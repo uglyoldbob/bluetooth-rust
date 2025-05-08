@@ -14,6 +14,18 @@ pub struct BluetoothHandler {
 }
 
 impl BluetoothHandler {
+    /// Retrieve the bluetooth addresses for all bluetooth adapters present
+    pub async fn addresses(&self) -> Vec<bluer::Address> {
+        let mut addrs = Vec::new();
+        for a in &self.adapters {
+            if let Ok(addr) = a.address().await {
+                addrs.push(addr);
+            }
+        }
+        addrs
+    }
+
+
     /// Construct a new self
     pub async fn new(s: tokio::sync::mpsc::Sender<super::MessageToBluetoothHost>) -> Option<Self> {
         let session = bluer::Session::new().await.ok()?;
