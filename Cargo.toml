@@ -1,13 +1,14 @@
 [package]
 name = "bluetooth-rust"
 description = "A bluetooth communication library"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = ["crates-io"]
 repository = "https://github.com/uglyoldbob/bluetooth-rust.git"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+enum_dispatch = "0.3.13"
 futures = "0.3.30"
 log = "0.4"
 ouroboros = "0.18.5"

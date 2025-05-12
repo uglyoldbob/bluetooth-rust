@@ -74,10 +74,12 @@ impl BluetoothUuid {
             BluetoothUuid::Unknown(s) => s,
         }
     }
+}
 
-    /// Convert the given str into a Self
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for BluetoothUuid {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "00001101-0000-1000-8000-00805F9B34FB" => BluetoothUuid::SPP,
             "0000110a-0000-1000-8000-00805f9b34fb" => BluetoothUuid::A2dpSource,
             "0000111e-0000-1000-8000-00805f9b34fb" => BluetoothUuid::HfpHs,
@@ -96,14 +98,15 @@ impl BluetoothUuid {
             "00001112-0000-1000-8000-00805f9b34fb" => BluetoothUuid::HspAg,
             "4de17a00-52cb-11e6-bdf4-0800200c9a66" => BluetoothUuid::AndroidAuto,
             _ => BluetoothUuid::Unknown(s.to_string()),
-        }
+        })
     }
 }
 
 #[cfg(target_os = "android")]
 impl From<ParcelUuid> for BluetoothUuid {
     fn from(value: ParcelUuid) -> Self {
-        BluetoothUuid::from_str(&value.to_string().unwrap())
+        use std::str::FromStr;
+        BluetoothUuid::from_str(&value.to_string().unwrap()).unwrap()
     }
 }
 

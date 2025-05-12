@@ -1,7 +1,7 @@
 //! Android specific bluetooth code
 
-use winit::platform::android::activity::AndroidApp;
 use jni_min_helper::*;
+use winit::platform::android::activity::AndroidApp;
 
 /// Maps unexpected JNI errors to `std::io::Error`.
 /// (`From<jni::errors::Error>` cannot be implemented for `std::io::Error`
@@ -80,10 +80,82 @@ use std::sync::OnceLock;
 mod socket;
 pub use socket::BluetoothSocket;
 
-use crate::uuid::ParcelUuid;
+use crate::bluetooth_uuid::ParcelUuid;
 
 mod device;
 pub use device::BluetoothDevice;
+
+pub struct BluetoothDiscovery<'a> {
+    adapter: &'a mut OnceLock<jni::objects::GlobalRef>,
+    java: Arc<Mutex<super::Java>>,
+}
+
+impl<'a> BluetoothDiscovery<'a> {
+    fn new(
+        adapter: &'a mut OnceLock<jni::objects::GlobalRef>,
+        java: Arc<Mutex<super::Java>>,
+    ) -> Self {
+        Self { adapter, java }
+    }
+}
+
+impl<'a> Drop for BluetoothDiscovery<'a> {
+    fn drop(&mut self) {
+        let mut java = self.java.lock().unwrap();
+        if let Some(adap) = self.adapter.get() {
+            java.use_env(|env, _context| {
+                let _ = env
+                    .call_method(adap, "cancelDiscovery", "()Z", &[])
+                    .clear_ex();
+            });
+        }
+    }
+}
+
+pub struct RfcommStream {}
+
+impl tokio::io::AsyncRead for RfcommStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        todo!()
+    }
+}
+
+impl tokio::io::AsyncWrite for RfcommStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        todo!()
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        todo!()
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        todo!()
+    }
+}
+
+pub struct BluetoothRfcommProfile {
+}
+
+impl crate::BluetoothRfcommProfileTrait for BluetoothRfcommProfile {
+    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
+        todo!()
+    }
+}
 
 pub struct Bluetooth {
     adapter: OnceLock<jni::objects::GlobalRef>,
@@ -92,6 +164,23 @@ pub struct Bluetooth {
     receiver: Option<jni::objects::GlobalRef>,
     /// The broadcast_receiver for the bluetooth uuid
     blue_uuid_receiver: Option<jni_min_helper::BroadcastReceiver>,
+}
+
+impl crate::BluetoothAdapterTrait for Bluetooth {
+    async fn register_rfcomm_profile(
+        &self,
+        _settings: crate::BluetoothRfcommProfileSettings,
+    ) -> Result<crate::BluetoothRfcommProfile, String> {
+        todo!();
+    }
+
+    fn get_paired_devices(&mut self) -> Option<Vec<crate::BluetoothDevice>> {
+        todo!()
+    }
+
+    fn start_discovery(&mut self) -> crate::BluetoothDiscovery {
+        BluetoothDiscovery::new(&mut self.adapter, self.java.clone()).into()
+    }
 }
 
 use jni_min_helper::*;
@@ -107,18 +196,6 @@ impl Bluetooth {
             java,
             receiver: None,
             blue_uuid_receiver: None,
-        }
-    }
-
-    pub fn cancel_discovery(&mut self) {
-        self.check_adapter();
-        let mut java = self.java.lock().unwrap();
-        if let Some(adap) = self.adapter.get() {
-            java.use_env(|env, _context| {
-                let _ = env
-                    .call_method(adap, "cancelDiscovery", "()Z", &[])
-                    .clear_ex();
-            });
         }
     }
 
