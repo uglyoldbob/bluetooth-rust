@@ -122,9 +122,9 @@ pub trait BluetoothAdapterTrait {
         settings: BluetoothRfcommProfileSettings,
     ) -> Result<BluetoothRfcommProfile, String>;
     ///Get a list of paired bluetooth devices
-    fn get_paired_devices(&mut self) -> Option<Vec<BluetoothDevice>>;
+    fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
-    fn start_discovery(&mut self) -> BluetoothDiscovery;
+    fn start_discovery(&self) -> BluetoothDiscovery;
     /// Get the mac addresses of all bluetooth adapters for the system
     async fn addresses(&self) -> Vec<[u8;6]>;
 }

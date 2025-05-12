@@ -127,13 +127,13 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
             .map_err(|e| e.to_string())
     }
 
-    fn start_discovery(&mut self) -> crate::BluetoothDiscovery {
+    fn start_discovery(&self) -> crate::BluetoothDiscovery {
         BluetoothDiscovery::new().into()
     }
 
-    fn get_paired_devices(&mut self) -> Option<Vec<crate::BluetoothDevice>> {
+    fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
         let list = Vec::new();
-        for adapter in &mut self.adapters {
+        for adapter in &self.adapters {
             todo!();
         }
         Some(list)

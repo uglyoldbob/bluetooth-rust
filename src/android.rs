@@ -86,13 +86,13 @@ mod device;
 pub use device::BluetoothDevice;
 
 pub struct BluetoothDiscovery<'a> {
-    adapter: &'a mut OnceLock<jni::objects::GlobalRef>,
+    adapter: &'a OnceLock<jni::objects::GlobalRef>,
     java: Arc<Mutex<super::Java>>,
 }
 
 impl<'a> BluetoothDiscovery<'a> {
     fn new(
-        adapter: &'a mut OnceLock<jni::objects::GlobalRef>,
+        adapter: &'a OnceLock<jni::objects::GlobalRef>,
         java: Arc<Mutex<super::Java>>,
     ) -> Self {
         Self { adapter, java }
@@ -174,12 +174,12 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
         todo!();
     }
 
-    fn get_paired_devices(&mut self) -> Option<Vec<crate::BluetoothDevice>> {
+    fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
         todo!()
     }
 
-    fn start_discovery(&mut self) -> crate::BluetoothDiscovery {
-        BluetoothDiscovery::new(&mut self.adapter, self.java.clone()).into()
+    fn start_discovery(&self) -> crate::BluetoothDiscovery {
+        BluetoothDiscovery::new(&self.adapter, self.java.clone()).into()
     }
 
     async fn addresses(&self) -> Vec<[u8;6]> {
