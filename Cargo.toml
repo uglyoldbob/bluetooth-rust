@@ -1,7 +1,7 @@
 [package]
 name = "bluetooth-rust"
 description = "A bluetooth communication library"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 publish = ["crates-io"]
 repository = "https://github.com/uglyoldbob/bluetooth-rust.git"

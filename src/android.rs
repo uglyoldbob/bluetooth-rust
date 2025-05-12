@@ -181,6 +181,12 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
     fn start_discovery(&mut self) -> crate::BluetoothDiscovery {
         BluetoothDiscovery::new(&mut self.adapter, self.java.clone()).into()
     }
+
+    async fn addresses(&self) -> Vec<[u8;6]> {
+        let a = Vec::new();
+        todo!();
+        a
+    }
 }
 
 use jni_min_helper::*;

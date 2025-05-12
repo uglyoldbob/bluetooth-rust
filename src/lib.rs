@@ -124,6 +124,8 @@ pub trait BluetoothAdapterTrait {
     fn get_paired_devices(&mut self) -> Option<Vec<BluetoothDevice>>;
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
     fn start_discovery(&mut self) -> BluetoothDiscovery;
+    /// Get the mac addresses of all bluetooth adapters for the system
+    async fn addresses(&self) -> Vec<[u8;6]>;
 }
 
 /// The pairing status of a bluetooth device

@@ -138,6 +138,16 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
         }
         Some(list)
     }
+
+    async fn addresses(&self) -> Vec<[u8;6]> {
+        let mut a = Vec::new();
+        for adapter in &self.adapters {
+            if let Ok(adr) = adapter.address().await {
+                a.push(adr.0);
+            }
+        }
+        a
+    }
 }
 
 impl BluetoothHandler {
