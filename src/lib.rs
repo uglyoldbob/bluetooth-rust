@@ -72,6 +72,7 @@ pub enum BluetoothResponse {
 pub struct BluetoothSocket<'a>(&'a mut android::BluetoothSocket);
 
 /// Settings for an rfcomm profile
+#[derive(Clone)]
 pub struct BluetoothRfcommProfileSettings {
     /// The uuid for the profile
     pub uuid: String,
