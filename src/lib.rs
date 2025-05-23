@@ -127,6 +127,8 @@ pub trait BluetoothAdapterTrait {
     fn start_discovery(&self) -> BluetoothDiscovery;
     /// Get the mac addresses of all bluetooth adapters for the system
     async fn addresses(&self) -> Vec<[u8;6]>;
+    /// Set the discoverable property
+    async fn set_discoverable(&self, d: bool) -> Result<(), ()>;
 }
 
 /// The pairing status of a bluetooth device

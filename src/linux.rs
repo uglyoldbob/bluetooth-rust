@@ -148,6 +148,13 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
         }
         a
     }
+
+    async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
+        for adapter in &self.adapters {
+            adapter.set_discoverable(d).await.map_err(|_|())?;
+        }
+        Ok(())
+    }
 }
 
 impl BluetoothHandler {
