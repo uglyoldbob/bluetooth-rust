@@ -1,0 +1,45 @@
+[package]
+name = "android-example"
+version = "0.1.0"
+authors = ["Thomas Epperson <thomas.epperson@gmail.com>"]
+edition = "2018"
+resolver = "2"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "android-example-desktop"
+path = "gen/bin/desktop.rs"
+
+[package.metadata.cargo-android]
+app-dependencies = [
+    "com.google.android.material:material:1.8.0",
+]
+project-dependencies = [ "org.jetbrains.kotlin:kotlin-gradle-plugin:1.6.21" ]
+app-plugins = [ "org.jetbrains.kotlin.android" ]
+app-theme-parent = "Theme.MaterialComponents.DayNight.DarkActionBar"
+
+[dependencies]
+android-properties = "0.2"
+bincode = {version = "2.0.1", features = ["serde"]}
+bluetooth-rust = { path="../../bluetooth-rust"}
+egui = "0.31.1"
+eframe = { version = "0.31.1", features = [ "wgpu" ] }
+image = { version = "0.25.2", features = ["jpeg", "png"] } # Add the types you want support for
+jni-min-helper = "0.3.0"
+log = "0.4"
+pollster = "0.2"
+wgpu = "25.0.0"
+winit = { version = "0.30.7", features = [ "android-native-activity" ] }
+serde = {version = "1.0.219", features = ["derive"]}
+
+[dependencies.jni]
+version = "0.21.1"
+features = ["invocation", "default"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.15.0"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+env_logger = "0.9"

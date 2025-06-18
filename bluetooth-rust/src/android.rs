@@ -91,10 +91,7 @@ pub struct BluetoothDiscovery<'a> {
 }
 
 impl<'a> BluetoothDiscovery<'a> {
-    fn new(
-        adapter: &'a OnceLock<jni::objects::GlobalRef>,
-        java: Arc<Mutex<super::Java>>,
-    ) -> Self {
+    fn new(adapter: &'a OnceLock<jni::objects::GlobalRef>, java: Arc<Mutex<super::Java>>) -> Self {
         Self { adapter, java }
     }
 }
@@ -148,8 +145,7 @@ impl tokio::io::AsyncWrite for RfcommStream {
     }
 }
 
-pub struct BluetoothRfcommProfile {
-}
+pub struct BluetoothRfcommProfile {}
 
 impl crate::BluetoothRfcommProfileTrait for BluetoothRfcommProfile {
     async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
@@ -157,6 +153,7 @@ impl crate::BluetoothRfcommProfileTrait for BluetoothRfcommProfile {
     }
 }
 
+/// The bluetooth adapter struct for android code
 pub struct Bluetooth {
     adapter: OnceLock<jni::objects::GlobalRef>,
     java: Arc<Mutex<super::Java>>,
@@ -172,19 +169,72 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
         _settings: crate::BluetoothRfcommProfileSettings,
     ) -> Result<crate::BluetoothRfcommProfile, String> {
         todo!();
+        //listenUsingRfcommWithServiceRecord
+    }
+
+    async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
+        let mut java = self.java.lock().unwrap();
+        java.use_env(|env, context| {
+            let arg = "android.bluetooth.adapter.action.REQUEST_DISCOVERABLE"
+                .new_jobject(env)
+                .map_err(|e| jerr(env, e))
+                .unwrap();
+            let intent = env
+                .new_object(
+                    "android/content/Intent",
+                    "(Ljava/lang/String;)V",
+                    &[(&arg).into()],
+                )
+                .unwrap();
+            let mut args = Vec::new();
+            args.push(&intent);
+            let mut args2: Vec<jni::objects::JValueGen<&jni::objects::JObject>> =
+                args.iter().map(|a| a.try_into().unwrap()).collect();
+            args2.push(1.into());
+            let a = env.call_method(
+                context,
+                "startActivityForResult",
+                "(Landroid/content/Intent;I)V",
+                args2.as_slice(),
+            );
+            log::error!("Results of bluetooth enable discoverable is {:?}", a);
+        });
+        Ok(())
     }
 
     fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
-        todo!()
+        let bd = self.get_bonded_devices();
+        if let Some(bd) = bd {
+            let mut devs = Vec::new();
+            for b in bd {
+                devs.push(crate::BluetoothDevice::Android(b));
+            }
+            Some(devs)
+        } else {
+            None
+        }
     }
 
     fn start_discovery(&self) -> crate::BluetoothDiscovery {
         BluetoothDiscovery::new(&self.adapter, self.java.clone()).into()
     }
 
-    async fn addresses(&self) -> Vec<[u8;6]> {
-        let a = Vec::new();
-        todo!();
+    async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
+        let mut a = Vec::new();
+        let mut java = self.java.lock().unwrap();
+        let n = java.use_env(|env, context| {
+            let adapter = self.adapter.get().unwrap().as_obj();
+            let action = env
+                .call_method(adapter, "getAddress", "()Ljava/lang/String;", &[])
+                .get_object(env)?;
+            if action.is_null() {
+                return Err(jni::errors::Error::NullPtr("No action"));
+            }
+            action.get_string(env)
+        });
+        if let Ok(n) = n {
+            a.push(super::BluetoothAdapterAddress::String(n));
+        }
         a
     }
 }
@@ -196,6 +246,7 @@ type ReadCallback = Box<dyn Fn(Option<usize>) + 'static + Send>;
 const BLUETOOTH_SERVICE: &str = "bluetooth";
 
 impl Bluetooth {
+    /// constructs a new Self with the protected java instance
     pub fn new(java: Arc<Mutex<super::Java>>) -> Self {
         Self {
             adapter: OnceLock::new(),
@@ -236,6 +287,7 @@ impl Bluetooth {
         }
     }
 
+    /// Enables the bluetooth adapter
     pub fn enable(&mut self) {
         if !self.is_enabled() {
             log::error!("Bluetooth not enabled. Requesting it to be enabled");
@@ -268,6 +320,7 @@ impl Bluetooth {
         }
     }
 
+    /// Returns the enabled state of the bluetooth adapter
     pub fn is_enabled(&mut self) -> bool {
         self.check_adapter();
         let mut java = self.java.lock().unwrap();
@@ -281,8 +334,8 @@ impl Bluetooth {
         })
     }
 
-    pub fn get_bonded_devices(&mut self) -> Option<Vec<BluetoothDevice>> {
-        self.check_adapter();
+    /// Get the list of bonded devices for the bluetooth adapter
+    pub fn get_bonded_devices(&self) -> Option<Vec<BluetoothDevice>> {
         let mut java = self.java.lock().unwrap();
         java.use_env(
             |env, _context| -> Result<Vec<BluetoothDevice>, std::io::Error> {

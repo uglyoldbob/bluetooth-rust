@@ -1,0 +1,5 @@
+[app]
+name = "android-example"
+stylized-name = "AndroidExample"
+identifier = "com.example.android"
+template-pack = "egui"

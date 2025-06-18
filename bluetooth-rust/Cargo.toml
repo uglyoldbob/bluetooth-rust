@@ -1,0 +1,24 @@
+[package]
+name = "bluetooth-rust"
+description = "A bluetooth communication library"
+version = "0.2.5"
+edition = "2024"
+publish = ["crates-io"]
+repository = "https://github.com/uglyoldbob/bluetooth-rust.git"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+enum_dispatch = "0.3.13"
+futures = "0.3.30"
+log = "0.4"
+ouroboros = "0.18.5"
+serde = {version = "1.0.219", features = ["derive"]}
+tokio = { version = "1.40.0", features = ["full"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+bluer = {version = "0.17.3", features = ["bluetoothd", "rfcomm"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = {version = "0.21.1", features = ["invocation", "default"] }
+jni-min-helper = "0.3.0"
+winit = { version = "0.30.7", features = [ "android-native-activity" ] }

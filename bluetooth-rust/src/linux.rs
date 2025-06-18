@@ -16,8 +16,11 @@ impl super::BluetoothRfcommConnectableTrait for bluer::rfcomm::ConnectRequest {
 }
 
 impl super::BluetoothRfcommProfileTrait for bluer::rfcomm::ProfileHandle {
-    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable,String> {
-        self.next().await.map(|a|a.into()).ok_or("Failed to get bluetooth connection".to_string())
+    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
+        self.next()
+            .await
+            .map(|a| a.into())
+            .ok_or("Failed to get bluetooth connection".to_string())
     }
 }
 
@@ -139,11 +142,11 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
         Some(list)
     }
 
-    async fn addresses(&self) -> Vec<[u8;6]> {
+    async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
         let mut a = Vec::new();
         for adapter in &self.adapters {
             if let Ok(adr) = adapter.address().await {
-                a.push(adr.0);
+                a.push(super::BluetoothAdapterAddress::Byte(adr.0));
             }
         }
         a
@@ -151,7 +154,7 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
 
     async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
         for adapter in &self.adapters {
-            adapter.set_discoverable(d).await.map_err(|_|())?;
+            adapter.set_discoverable(d).await.map_err(|_| ())?;
         }
         Ok(())
     }

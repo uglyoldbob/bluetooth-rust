@@ -12,7 +12,9 @@ use std::sync::Mutex;
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
-use android::Java;
+pub use android::Bluetooth;
+#[cfg(target_os = "android")]
+pub use android::Java;
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
@@ -113,6 +115,14 @@ pub enum BluetoothDiscovery<'a> {
     Bluez(linux::BluetoothDiscovery<'a>),
 }
 
+/// The address of a bluetooth adapter
+pub enum BluetoothAdapterAddress {
+    /// The address in string form
+    String(String),
+    /// The address in byte form
+    Byte([u8; 6]),
+}
+
 /// Common functionality for the bluetooth adapter
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothAdapterTrait {
@@ -126,7 +136,7 @@ pub trait BluetoothAdapterTrait {
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
     fn start_discovery(&self) -> BluetoothDiscovery;
     /// Get the mac addresses of all bluetooth adapters for the system
-    async fn addresses(&self) -> Vec<[u8;6]>;
+    async fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
     /// Set the discoverable property
     async fn set_discoverable(&self, d: bool) -> Result<(), ()>;
 }
