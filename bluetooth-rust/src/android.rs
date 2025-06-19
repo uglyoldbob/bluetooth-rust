@@ -145,11 +145,29 @@ impl tokio::io::AsyncWrite for RfcommStream {
     }
 }
 
-pub struct BluetoothRfcommProfile {}
+/// Very similar to the BluetoothRfcommProfile
+pub struct BluetoothRfcommConnectable {
+    /// A socket that can be used to accept bluetooth connections
+    socket: OnceLock<jni::objects::GlobalRef>,
+}
+
+impl super::BluetoothRfcommConnectableTrait for BluetoothRfcommConnectable {
+    async fn accept(self) -> Result<crate::BluetoothStream,String> {
+        todo!()
+    }
+}
+
+/// A bluetooth rfcomm profile
+pub struct BluetoothRfcommProfile {
+    /// A socket that can be used to accept bluetooth connections
+    socket: OnceLock<jni::objects::GlobalRef>,
+}
 
 impl crate::BluetoothRfcommProfileTrait for BluetoothRfcommProfile {
     async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
-        todo!()
+        Ok(crate::BluetoothRfcommConnectable::Android(BluetoothRfcommConnectable {
+            socket: self.socket.clone(),
+        }))
     }
 }
 
@@ -166,10 +184,85 @@ pub struct Bluetooth {
 impl crate::BluetoothAdapterTrait for Bluetooth {
     async fn register_rfcomm_profile(
         &self,
-        _settings: crate::BluetoothRfcommProfileSettings,
+        settings: crate::BluetoothRfcommProfileSettings,
     ) -> Result<crate::BluetoothRfcommProfile, String> {
-        todo!();
-        //listenUsingRfcommWithServiceRecord
+        let mut java2 = self.java.lock().unwrap();
+        {
+            java2.use_env(|env, context| {
+                let jsettings = {
+                    let mut jsettings = env.new_object(
+                        "android/bluetooth/BluetoothSocketSettings.Builder",
+                        "(;)V",
+                        &[],
+                    ).map_err(|e| e.to_string())?;
+                    if let Some(auth) = settings.authenticate {
+                        let e = env
+                            .call_method(jsettings, "setAuthenticationRequired", "(Z)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[auth.into()])
+                            .get_object(env)
+                            .map_err(|e| jerr(env, e).to_string())?;
+                        jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
+                    }
+                    if let Some(val) = settings.psm {
+                        let e = env
+                            .call_method(jsettings, "setL2capPsm", "(I)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[val.into()])
+                            .get_object(env)
+                            .map_err(|e| jerr(env, e).to_string())?;
+                        jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
+                    }
+                    if let Some(name) = &settings.name {
+                        let arg = name
+                            .new_jobject(env)
+                            .map_err(|e| jerr(env, e))
+                            .unwrap();
+                        let e = env
+                            .call_method(jsettings, "setRfcommServiceName", "(Ljava/lang/String;)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[(&arg).into()])
+                            .get_object(env)
+                            .map_err(|e| jerr(env, e).to_string())?;
+                        jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
+                    }
+                    {
+                        let arg = settings.uuid.as_str()
+                            .new_jobject(env)
+                            .map_err(|e| jerr(env, e))
+                            .unwrap();
+                        let uuid_class = env.find_class("java/util/UUID").map_err(|e| jerr(env, e).to_string())?;
+                        let uuid = env.call_static_method(uuid_class, "fromString", "(Ljava/lang/String;)Ljava/util/UUID;", &[(&arg).into()]).map_err(|e| jerr(env, e).to_string())?;
+                        let e = env
+                            .call_method(jsettings, "setRfcommUuid", "(Ljava/util/UUID;)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[uuid.borrow()])
+                            .get_object(env)
+                            .map_err(|e| jerr(env, e).to_string())?;
+                        jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
+                    }
+                    let e = env
+                            .call_method(jsettings, "build", "()Landroid/bluetooth/BluetoothSocketSettings;", &[])
+                            .get_object(env)
+                            .map_err(|e| jerr(env, e).to_string())?;
+                    jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
+                    Ok::<jni::objects::JObject<'_>, String>(jsettings)
+                }?;
+                let jsettings = jni::objects::JValueGen::try_from(jsettings).map_err(|e| e.to_string())?;
+                let mut sig = String::new();
+                sig.push_str("(Landroid/bluetooth/BluetoothSocketSettings;)");
+                sig.push_str("Landroid/bluetooth/BluetoothServerSocket;");
+                let e = env
+                    .call_method(
+                        context,
+                        "listenUsingSocketSettings",
+                        &sig,
+                        &[jsettings.borrow()],
+                    )
+                    .get_object(env)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                let socket = env
+                    .new_global_ref(&e)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                Ok(crate::BluetoothRfcommProfile::Android(
+                    BluetoothRfcommProfile {
+                        socket: socket.into(),
+                    },
+                ))
+            })
+        }
     }
 
     async fn set_discoverable(&self, d: bool) -> Result<(), ()> {

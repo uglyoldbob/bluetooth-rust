@@ -339,6 +339,9 @@ pub trait BluetoothRfcommConnectableTrait {
 /// A bluetooth profile for rfcomm channels
 #[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableTrait)]
 pub enum BluetoothRfcommConnectable {
+    /// The android object for the profile
+    #[cfg(target_os = "android")]
+    Android(android::BluetoothRfcommConnectable),
     /// The bluez library in linux is responsible for the profile
     #[cfg(target_os = "linux")]
     Bluez(bluer::rfcomm::ConnectRequest),
