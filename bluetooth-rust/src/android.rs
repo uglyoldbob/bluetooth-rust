@@ -160,17 +160,52 @@ impl RfcommStream {
 
 impl std::io::Read for RfcommStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        todo!()
+        let mut java2 = self.java.lock().unwrap();
+        java2.use_env(|env, _context| {
+            let ba = env
+                .new_byte_array(buf.len() as i32)
+                .map_err(|e| std::io::Error::other(e))?;
+            let socket = self.socket.get().unwrap().as_obj();
+            let e = env
+                .call_method(socket, "readNBytes", "([BII)I", &[(&ba).into()])
+                .get_object(env)
+                .map_err(|e| std::io::Error::other(jerr(env, e).to_string()))?;
+            let l = e.get_int(env).map_err(|e| std::io::Error::other(e))?;
+            let a = env
+                .convert_byte_array(ba)
+                .map_err(|e| std::io::Error::other(e))?;
+            buf[0..l as usize].copy_from_slice(&a);
+            Ok(l as usize)
+        })
     }
 }
 
 impl std::io::Write for RfcommStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        todo!()
+        let mut java2 = self.java.lock().unwrap();
+        java2.use_env(|env, _context| {
+            let ba = env
+                .byte_array_from_slice(buf)
+                .map_err(|e| std::io::Error::other(e))?;
+            let socket = self.socket.get().unwrap().as_obj();
+            let _ = env
+                .call_method(socket, "write", "([B)", &[(&ba).into()])
+                .get_object(env)
+                .map_err(|e| std::io::Error::other(jerr(env, e).to_string()))?;
+            Ok(buf.len())
+        })
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        todo!()
+        let mut java2 = self.java.lock().unwrap();
+        java2.use_env(|env, _context| {
+            let socket = self.socket.get().unwrap().as_obj();
+            let _ = env
+                .call_method(socket, "flush", "()", &[])
+                .get_object(env)
+                .map_err(|e| std::io::Error::other(jerr(env, e).to_string()))?;
+            Ok(())
+        })
     }
 }
 

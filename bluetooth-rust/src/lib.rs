@@ -277,7 +277,9 @@ pub enum BluetoothStream {
 
 impl BluetoothStream {
     /// Used to check to see if the object supports async read, and then use the functionality
-    pub fn supports_async_read(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn tokio::io::AsyncRead> {
+    pub fn supports_async_read(
+        self: std::pin::Pin<&mut Self>,
+    ) -> Option<&mut dyn tokio::io::AsyncRead> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
             BluetoothStream::Bluez(pin) => Some(pin),
@@ -287,7 +289,9 @@ impl BluetoothStream {
     }
 
     /// Used to check to see if the object supports async write, and then use the functionality
-    pub fn supports_async_write(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn tokio::io::AsyncWrite> {
+    pub fn supports_async_write(
+        self: std::pin::Pin<&mut Self>,
+    ) -> Option<&mut dyn tokio::io::AsyncWrite> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
             BluetoothStream::Bluez(pin) => Some(pin),
