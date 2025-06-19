@@ -272,59 +272,47 @@ pub enum BluetoothStream {
     Bluez(std::pin::Pin<Box<bluer::rfcomm::Stream>>),
     /// Android code for a bluetooth stream
     #[cfg(target_os = "android")]
-    Android(std::pin::Pin<Box<android::RfcommStream>>),
+    Android(android::RfcommStream),
 }
 
-impl tokio::io::AsyncRead for BluetoothStream {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
+impl BluetoothStream {
+    /// Used to check to see if the object supports async read, and then use the functionality
+    pub fn supports_async_read(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn tokio::io::AsyncRead> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(s) => s.as_mut().poll_read(cx, buf),
+            BluetoothStream::Bluez(pin) => Some(pin),
             #[cfg(target_os = "android")]
-            BluetoothStream::Android(s) => s.as_mut().poll_read(cx, buf),
-        }
-    }
-}
-
-impl tokio::io::AsyncWrite for BluetoothStream {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        match self.get_mut() {
-            #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(s) => s.as_mut().poll_write(cx, buf),
-            #[cfg(target_os = "android")]
-            BluetoothStream::Android(s) => s.as_mut().poll_write(cx, buf),
+            BluetoothStream::Android(_pin) => None,
         }
     }
 
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+    /// Used to check to see if the object supports async write, and then use the functionality
+    pub fn supports_async_write(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn tokio::io::AsyncWrite> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(s) => s.as_mut().poll_flush(cx),
+            BluetoothStream::Bluez(pin) => Some(pin),
             #[cfg(target_os = "android")]
-            BluetoothStream::Android(s) => s.as_mut().poll_flush(cx),
+            BluetoothStream::Android(_pin) => None,
         }
     }
 
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+    /// Used to try to use synchronous read functionality
+    pub fn supports_sync_read(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn std::io::Read> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(s) => s.as_mut().poll_shutdown(cx),
+            BluetoothStream::Bluez(pin) => None,
             #[cfg(target_os = "android")]
-            BluetoothStream::Android(s) => s.as_mut().poll_shutdown(cx),
+            BluetoothStream::Android(pin) => Some(pin),
+        }
+    }
+
+    /// Used to try to use synchronous write functionality
+    pub fn supports_sync_write(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn std::io::Write> {
+        match self.get_mut() {
+            #[cfg(target_os = "linux")]
+            BluetoothStream::Bluez(pin) => None,
+            #[cfg(target_os = "android")]
+            BluetoothStream::Android(pin) => Some(pin),
         }
     }
 }

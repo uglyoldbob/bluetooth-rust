@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "bluetooth-rust"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
  "bluer",
  "enum_dispatch",

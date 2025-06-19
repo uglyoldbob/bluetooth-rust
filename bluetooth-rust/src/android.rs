@@ -158,36 +158,18 @@ impl RfcommStream {
     }
 }
 
-impl tokio::io::AsyncRead for RfcommStream {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
+impl std::io::Read for RfcommStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         todo!()
     }
 }
 
-impl tokio::io::AsyncWrite for RfcommStream {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+impl std::io::Write for RfcommStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         todo!()
     }
 
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        todo!()
-    }
-
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
+    fn flush(&mut self) -> std::io::Result<()> {
         todo!()
     }
 }
@@ -219,7 +201,7 @@ impl super::BluetoothRfcommConnectableTrait for BluetoothRfcommConnectable {
                     .new_global_ref(&e)
                     .map_err(|e| jerr(env, e).to_string())?;
                 let s = RfcommStream::new(socket.into(), self.java.clone())?;
-                let comm = crate::BluetoothStream::Android(Box::pin(s));
+                let comm = crate::BluetoothStream::Android(s);
                 Ok(comm)
             })
         })
