@@ -62,23 +62,20 @@ pub struct BluetoothRfcommSocket {
 }
 
 /// A struct for managing discovery of bluetooth devices
-pub struct BluetoothDiscovery<'a> {
-    /// phantom so the struct acts like it has a lifetime
-    _dummy: PhantomData<&'a ()>,
+pub struct BluetoothDiscovery {
 }
 
-impl<'a> BluetoothDiscovery<'a> {
+impl BluetoothDiscovery {
     /// construct a new self
     fn new() -> Self {
         Self {
-            _dummy: PhantomData,
         }
     }
 }
 
-impl<'a> super::BluetoothDiscoveryTrait for BluetoothDiscovery<'a> {}
+impl super::BluetoothDiscoveryTrait for BluetoothDiscovery {}
 
-impl<'a> Drop for BluetoothDiscovery<'a> {
+impl Drop for BluetoothDiscovery {
     fn drop(&mut self) {}
 }
 
@@ -119,6 +116,17 @@ impl TryFrom<super::BluetoothRfcommProfileSettings> for bluer::rfcomm::Profile {
 }
 
 impl super::BluetoothAdapterTrait for BluetoothHandler {
+    fn supports_async(&mut self) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
+        Some(self)
+    }
+
+    fn supports_sync(&mut self) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
+        None
+    }
+}
+
+#[async_trait::async_trait]
+impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
     async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,

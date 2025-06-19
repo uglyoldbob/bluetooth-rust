@@ -106,13 +106,13 @@ pub trait BluetoothDiscoveryTrait {}
 
 /// The trait for the object that manages bluetooth discovery
 #[enum_dispatch::enum_dispatch(BluetoothDiscoveryTrait)]
-pub enum BluetoothDiscovery<'a> {
+pub enum BluetoothDiscovery {
     /// The android version
     #[cfg(target_os = "android")]
-    Android(android::BluetoothDiscovery<'a>),
+    Android(android::BluetoothDiscovery),
     /// Linux bluez library implementation
     #[cfg(target_os = "linux")]
-    Bluez(linux::BluetoothDiscovery<'a>),
+    Bluez(linux::BluetoothDiscovery),
 }
 
 /// The address of a bluetooth adapter
@@ -123,9 +123,10 @@ pub enum BluetoothAdapterAddress {
     Byte([u8; 6]),
 }
 
-/// Common functionality for the bluetooth adapter
+/// Common async functionality for the bluetooth adapter
 #[enum_dispatch::enum_dispatch]
-pub trait BluetoothAdapterTrait {
+#[async_trait::async_trait]
+pub trait AsyncBluetoothAdapterTrait {
     /// Attempt to register a new rfcomm profile
     async fn register_rfcomm_profile(
         &self,
@@ -139,6 +140,33 @@ pub trait BluetoothAdapterTrait {
     async fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
     /// Set the discoverable property
     async fn set_discoverable(&self, d: bool) -> Result<(), ()>;
+}
+
+/// Common sync functionality for the bluetooth adapter
+#[enum_dispatch::enum_dispatch]
+pub trait SyncBluetoothAdapterTrait {
+    /// Attempt to register a new rfcomm profile
+    fn register_rfcomm_profile(
+        &self,
+        settings: BluetoothRfcommProfileSettings,
+    ) -> Result<BluetoothRfcommProfile, String>;
+    ///Get a list of paired bluetooth devices
+    fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
+    /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
+    fn start_discovery(&self) -> BluetoothDiscovery;
+    /// Get the mac addresses of all bluetooth adapters for the system
+    fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
+    /// Set the discoverable property
+    fn set_discoverable(&self, d: bool) -> Result<(), ()>;
+}
+
+/// Common functionality for the bluetooth adapter
+#[enum_dispatch::enum_dispatch]
+pub trait BluetoothAdapterTrait {
+    /// Returns Some when the async interface is supported
+    fn supports_async(&mut self) -> Option<&mut dyn AsyncBluetoothAdapterTrait>;
+    /// Returns Some when the sync interface is supported
+    fn supports_sync(&mut self) -> Option<&mut dyn SyncBluetoothAdapterTrait>;
 }
 
 /// The pairing status of a bluetooth device

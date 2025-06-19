@@ -200,6 +200,7 @@ dependencies = [
  "log",
  "pollster 0.2.5",
  "serde",
+ "tokio",
  "wgpu 25.0.2",
  "winit",
 ]
@@ -694,6 +695,7 @@ dependencies = [
 name = "bluetooth-rust"
 version = "0.3.0"
 dependencies = [
+ "async-trait",
  "bluer",
  "enum_dispatch",
  "futures",

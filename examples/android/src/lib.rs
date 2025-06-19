@@ -3,13 +3,13 @@
 #![deny(missing_docs)]
 #![deny(clippy::missing_docs_in_private_items)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 use eframe::{NativeOptions, Renderer};
 
-use bluetooth_rust::Java;
+use bluetooth_rust::{BluetoothAdapterTrait, Java};
 
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
@@ -45,6 +45,8 @@ pub struct MainWindow {
     bluetooth: bluetooth_rust::BluetoothAdapter,
     known_uuids: BTreeMap<String, Vec<bluetooth_rust::BluetoothUuid>>,
     bluetooth_devs: BTreeMap<String, BluetoothConfig>,
+    bluetooth_discovery: Option<bluetooth_rust::BluetoothDiscovery>,
+    profile: Option<Result<bluetooth_rust::BluetoothRfcommProfile, String>>,
 }
 
 impl MainWindow {
@@ -70,6 +72,26 @@ impl eframe::App for MainWindow {
                     .size(Self::font_size()),
             );
             let min_size = Self::min_size(ui);
+            if ui.button("Start discovery").clicked() {
+                if let Some(s) = self.bluetooth.supports_sync() {
+                    self.bluetooth_discovery = Some(s.start_discovery());
+                }
+            }
+            if self.bluetooth_discovery.is_some() {
+                if ui.button("Cancel discovery").clicked() {
+                    self.bluetooth_discovery.take();
+                }
+            }
+            if let Some(profile) = &self.profile {
+                match profile {
+                    Ok(_p) => {
+                        ui.label("Got a valid bluetooth profile");
+                    }
+                    Err(e) => {
+                        ui.label(format!("Failed to get a valid profile: {}", e));
+                    }
+                }
+            }
         });
     }
 }
@@ -125,8 +147,26 @@ impl MainWindow {
             bluetooth: bluetooth_rust::BluetoothAdapter::Android(b),
             known_uuids: BTreeMap::new(),
             bluetooth_devs: BTreeMap::new(),
+            bluetooth_discovery: None,
+            profile: None,
         };
         s.load_config();
+        if let Some(st) = s.bluetooth.supports_sync() {
+            let profile = st.register_rfcomm_profile(bluetooth_rust::BluetoothRfcommProfileSettings { 
+                uuid: "00001812-0000-1000-8000-00805f9b34fb".to_string(), 
+                name: Some("NES joystick".to_string()), 
+                service_uuid: None, 
+                channel: None, 
+                psm: None, 
+                authenticate: Some(true), 
+                authorize: Some(true), 
+                auto_connect: Some(true), 
+                sdp_record: None, 
+                sdp_version: None, 
+                sdp_features: None, 
+            });
+            s.profile = Some(profile);
+        }
         s
     }
 }

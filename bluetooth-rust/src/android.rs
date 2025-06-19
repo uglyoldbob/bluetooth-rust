@@ -86,18 +86,18 @@ use crate::bluetooth_uuid::ParcelUuid;
 mod device;
 pub use device::BluetoothDevice;
 
-pub struct BluetoothDiscovery<'a> {
-    adapter: &'a OnceLock<jni::objects::GlobalRef>,
+pub struct BluetoothDiscovery {
+    adapter: OnceLock<jni::objects::GlobalRef>,
     java: Arc<Mutex<super::Java>>,
 }
 
-impl<'a> BluetoothDiscovery<'a> {
-    fn new(adapter: &'a OnceLock<jni::objects::GlobalRef>, java: Arc<Mutex<super::Java>>) -> Self {
+impl<'a> BluetoothDiscovery {
+    fn new(adapter: OnceLock<jni::objects::GlobalRef>, java: Arc<Mutex<super::Java>>) -> Self {
         Self { adapter, java }
     }
 }
 
-impl<'a> Drop for BluetoothDiscovery<'a> {
+impl Drop for BluetoothDiscovery {
     fn drop(&mut self) {
         let mut java = self.java.lock().unwrap();
         if let Some(adap) = self.adapter.get() {
@@ -272,8 +272,18 @@ pub struct Bluetooth {
     blue_uuid_receiver: Option<jni_min_helper::BroadcastReceiver>,
 }
 
-impl crate::BluetoothAdapterTrait for Bluetooth {
-    async fn register_rfcomm_profile(
+impl super::BluetoothAdapterTrait for Bluetooth {
+    fn supports_async(&mut self) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
+        None
+    }
+
+    fn supports_sync(&mut self) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
+        Some(self)
+    }
+}
+
+impl crate::SyncBluetoothAdapterTrait for Bluetooth {
+    fn register_rfcomm_profile(
         &self,
         settings: crate::BluetoothRfcommProfileSettings,
     ) -> Result<crate::BluetoothRfcommProfile, String> {
@@ -281,36 +291,43 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
         {
             java2.use_env(|env, context| {
                 let jsettings = {
+                    log::error!("Register rfcomm 1");
+                    let ss = env.find_class("android/bluetooth/BluetoothSocketSettings").map_err(|e| e.to_string())?;
+                    log::error!("Register rfcomm 1.1");
                     let mut jsettings = env.new_object(
-                        "android/bluetooth/BluetoothSocketSettings.Builder",
-                        "(;)V",
+                        "Landroid.bluetooth.BluetoothSocketSettings.Builder",
+                        "()V",
                         &[],
                     ).map_err(|e| e.to_string())?;
+                    log::error!("Register rfcomm 2");
                     if let Some(auth) = settings.authenticate {
                         let e = env
-                            .call_method(jsettings, "setAuthenticationRequired", "(Z)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[auth.into()])
+                            .call_method(jsettings, "setAuthenticationRequired", "(Z)Landroid/bluetooth/BluetoothSocketSettings/Builder;", &[auth.into()])
                             .get_object(env)
                             .map_err(|e| jerr(env, e).to_string())?;
                         jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
                     }
+                    log::error!("Register rfcomm 3");
                     if let Some(val) = settings.psm {
                         let e = env
-                            .call_method(jsettings, "setL2capPsm", "(I)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[val.into()])
+                            .call_method(jsettings, "setL2capPsm", "(I)Landroid/bluetooth/BluetoothSocketSettings/Builder;", &[val.into()])
                             .get_object(env)
                             .map_err(|e| jerr(env, e).to_string())?;
                         jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
                     }
+                    log::error!("Register rfcomm 4");
                     if let Some(name) = &settings.name {
                         let arg = name
                             .new_jobject(env)
                             .map_err(|e| jerr(env, e))
                             .unwrap();
                         let e = env
-                            .call_method(jsettings, "setRfcommServiceName", "(Ljava/lang/String;)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[(&arg).into()])
+                            .call_method(jsettings, "setRfcommServiceName", "(Ljava/lang/String;)Landroid/bluetooth/BluetoothSocketSettings/Builder;", &[(&arg).into()])
                             .get_object(env)
                             .map_err(|e| jerr(env, e).to_string())?;
                         jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
                     }
+                    log::error!("Register rfcomm 5");
                     {
                         let arg = settings.uuid.as_str()
                             .new_jobject(env)
@@ -319,19 +336,23 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
                         let uuid_class = env.find_class("java/util/UUID").map_err(|e| jerr(env, e).to_string())?;
                         let uuid = env.call_static_method(uuid_class, "fromString", "(Ljava/lang/String;)Ljava/util/UUID;", &[(&arg).into()]).map_err(|e| jerr(env, e).to_string())?;
                         let e = env
-                            .call_method(jsettings, "setRfcommUuid", "(Ljava/util/UUID;)Landroid/bluetooth/BluetoothSocketSettings.Builder;", &[uuid.borrow()])
+                            .call_method(jsettings, "setRfcommUuid", "(Ljava/util/UUID;)Landroid/bluetooth/BluetoothSocketSettings/Builder;", &[uuid.borrow()])
                             .get_object(env)
                             .map_err(|e| jerr(env, e).to_string())?;
                         jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
                     }
+                    log::error!("Register rfcomm 6");
                     let e = env
                             .call_method(jsettings, "build", "()Landroid/bluetooth/BluetoothSocketSettings;", &[])
                             .get_object(env)
                             .map_err(|e| jerr(env, e).to_string())?;
                     jsettings = env.new_local_ref(&e).map_err(|e| jerr(env, e).to_string())?;
+                    log::error!("Register rfcomm 7");
                     Ok::<jni::objects::JObject<'_>, String>(jsettings)
                 }?;
+                log::error!("Register rfcomm 8");
                 let jsettings = jni::objects::JValueGen::try_from(jsettings).map_err(|e| e.to_string())?;
+                log::error!("Register rfcomm 9");
                 let mut sig = String::new();
                 sig.push_str("(Landroid/bluetooth/BluetoothSocketSettings;)");
                 sig.push_str("Landroid/bluetooth/BluetoothServerSocket;");
@@ -344,9 +365,11 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
                     )
                     .get_object(env)
                     .map_err(|e| jerr(env, e).to_string())?;
+                log::error!("Register rfcomm 10");
                 let socket = env
                     .new_global_ref(&e)
                     .map_err(|e| jerr(env, e).to_string())?;
+                log::error!("Register rfcomm 11");
                 Ok(crate::BluetoothRfcommProfile::Android(
                     BluetoothRfcommProfile {
                         socket: socket.into(),
@@ -357,7 +380,7 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
         }
     }
 
-    async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
+    fn set_discoverable(&self, d: bool) -> Result<(), ()> {
         let mut java = self.java.lock().unwrap();
         java.use_env(|env, context| {
             let arg = "android.bluetooth.adapter.action.REQUEST_DISCOVERABLE"
@@ -401,10 +424,10 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
     }
 
     fn start_discovery(&self) -> crate::BluetoothDiscovery {
-        BluetoothDiscovery::new(&self.adapter, self.java.clone()).into()
+        BluetoothDiscovery::new(self.adapter.clone(), self.java.clone()).into()
     }
 
-    async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
+    fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
         let mut a = Vec::new();
         let mut java = self.java.lock().unwrap();
         let n = java.use_env(|env, context| {

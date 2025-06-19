@@ -30,9 +30,10 @@ image = { version = "0.25.2", features = ["jpeg", "png"] } # Add the types you w
 jni-min-helper = "0.3.0"
 log = "0.4"
 pollster = "0.2"
+serde = {version = "1.0.219", features = ["derive"]}
+tokio = { version = "1.40.0", features = ["full"] }
 wgpu = "25.0.0"
 winit = { version = "0.30.7", features = [ "android-native-activity" ] }
-serde = {version = "1.0.219", features = ["derive"]}
 
 [dependencies.jni]
 version = "0.21.1"
