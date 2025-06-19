@@ -191,7 +191,7 @@ impl std::io::Write for RfcommStream {
             let _ = env
                 .call_method(socket, "write", "([B)", &[(&ba).into()])
                 .get_object(env)
-                .map_err(|e| std::io::Error::other(jerr(env, e).to_string()))?;
+                .map_err(|e| jerr(env, e))?;
             Ok(buf.len())
         })
     }
@@ -203,7 +203,7 @@ impl std::io::Write for RfcommStream {
             let _ = env
                 .call_method(socket, "flush", "()", &[])
                 .get_object(env)
-                .map_err(|e| std::io::Error::other(jerr(env, e).to_string()))?;
+                .map_err(|e| jerr(env, e))?;
             Ok(())
         })
     }
