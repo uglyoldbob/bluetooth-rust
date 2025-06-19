@@ -1,5 +1,6 @@
 //! Android specific bluetooth code
 
+use jni::objects::GlobalRef;
 use jni_min_helper::*;
 use winit::platform::android::activity::AndroidApp;
 
@@ -109,7 +110,53 @@ impl<'a> Drop for BluetoothDiscovery<'a> {
     }
 }
 
-pub struct RfcommStream {}
+/// And object used for communication with a remote bluetooth device
+pub struct RfcommStream {
+    /// The BluetoothSocket object
+    socket: OnceLock<jni::objects::GlobalRef>,
+    /// The input stream
+    input: OnceLock<jni::objects::GlobalRef>,
+    /// The output stream
+    output: OnceLock<jni::objects::GlobalRef>,
+    /// The java instance
+    java: Arc<Mutex<super::Java>>,
+}
+
+impl RfcommStream {
+    /// Build a new Self, getting the input and output streams needed for communication
+    pub fn new(
+        socket: OnceLock<jni::objects::GlobalRef>,
+        java: Arc<Mutex<super::Java>>,
+    ) -> Result<Self, String> {
+        let (input, output) = {
+            let mut java2 = java.lock().unwrap();
+            java2.use_env(|env, _context| {
+                let socket = socket.get().unwrap().as_obj();
+                let e = env
+                    .call_method(socket, "getInputStream", "()Ljava/io/InputStream;", &[])
+                    .get_object(env)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                let input = env
+                    .new_global_ref(&e)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                let e = env
+                    .call_method(socket, "getOutputStream", "()Ljava/io/OutputStream;", &[])
+                    .get_object(env)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                let output = env
+                    .new_global_ref(&e)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                Ok::<(GlobalRef, GlobalRef), String>((input, output))
+            })
+        }?;
+        Ok(Self {
+            socket,
+            input: input.into(),
+            output: output.into(),
+            java,
+        })
+    }
+}
 
 impl tokio::io::AsyncRead for RfcommStream {
     fn poll_read(
@@ -149,11 +196,33 @@ impl tokio::io::AsyncWrite for RfcommStream {
 pub struct BluetoothRfcommConnectable {
     /// A socket that can be used to accept bluetooth connections
     socket: OnceLock<jni::objects::GlobalRef>,
+    /// The java instance
+    java: Arc<Mutex<super::Java>>,
 }
 
 impl super::BluetoothRfcommConnectableTrait for BluetoothRfcommConnectable {
-    async fn accept(self) -> Result<crate::BluetoothStream,String> {
-        todo!()
+    async fn accept(self) -> Result<crate::BluetoothStream, String> {
+        tokio::task::block_in_place(|| {
+            let mut java2 = self.java.lock().unwrap();
+            java2.use_env(|env, _context| {
+                let socket = self.socket.get().unwrap().as_obj();
+                let e = env
+                    .call_method(
+                        socket,
+                        "accept",
+                        "()Landroid/bluetooth/BluetoothSocket;",
+                        &[],
+                    )
+                    .get_object(env)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                let socket = env
+                    .new_global_ref(&e)
+                    .map_err(|e| jerr(env, e).to_string())?;
+                let s = RfcommStream::new(socket.into(), self.java.clone())?;
+                let comm = crate::BluetoothStream::Android(Box::pin(s));
+                Ok(comm)
+            })
+        })
     }
 }
 
@@ -161,13 +230,18 @@ impl super::BluetoothRfcommConnectableTrait for BluetoothRfcommConnectable {
 pub struct BluetoothRfcommProfile {
     /// A socket that can be used to accept bluetooth connections
     socket: OnceLock<jni::objects::GlobalRef>,
+    /// The java instance
+    java: Arc<Mutex<super::Java>>,
 }
 
 impl crate::BluetoothRfcommProfileTrait for BluetoothRfcommProfile {
     async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
-        Ok(crate::BluetoothRfcommConnectable::Android(BluetoothRfcommConnectable {
-            socket: self.socket.clone(),
-        }))
+        Ok(crate::BluetoothRfcommConnectable::Android(
+            BluetoothRfcommConnectable {
+                socket: self.socket.clone(),
+                java: self.java.clone(),
+            },
+        ))
     }
 }
 
@@ -259,6 +333,7 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
                 Ok(crate::BluetoothRfcommProfile::Android(
                     BluetoothRfcommProfile {
                         socket: socket.into(),
+                        java: self.java.clone(),
                     },
                 ))
             })
@@ -332,8 +407,6 @@ impl crate::BluetoothAdapterTrait for Bluetooth {
     }
 }
 
-use jni_min_helper::*;
-
 type ReadCallback = Box<dyn Fn(Option<usize>) + 'static + Send>;
 
 const BLUETOOTH_SERVICE: &str = "bluetooth";
@@ -367,7 +440,7 @@ impl Bluetooth {
                 if action.is_null() {
                     return Err(jni::errors::Error::NullPtr("No action"));
                 }
-                let action = action.get_string(env).map_err(|e| jerr(env, e));
+                let _ = action.get_string(env).map_err(|e| jerr(env, e));
                 Ok(())
             })
             .unwrap();
