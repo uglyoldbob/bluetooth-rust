@@ -489,6 +489,56 @@ impl Bluetooth {
         }
     }
 
+    /// Check to see if we have the specified permission
+    pub fn check_permission(&self, permission: &str,) -> Result<bool, std::io::Error> {
+        let mut java = self.java.lock().unwrap();
+        java.use_env(|env, context| {
+            self.check_permission2(env, context, permission)
+        })
+    }
+
+    /// Check to see if we have the specified permission
+    pub fn check_permission2(&self, env: &mut jni::JNIEnv, context: jni::objects::JObject, permission: &str,) -> Result<bool, std::io::Error> {
+        // Get ClassLoader instance from activity
+        let class_loader_obj = env
+            .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
+            .expect("Failed to get ClassLoader")
+            .l()
+            .map_err(|e| jerr(env, e))?;
+
+        // Name of the class you want to load
+        let class_name = "com.example.android.JniBridge"
+            .new_jobject(env)
+            .map_err(|e| jerr(env, e))?;
+
+        // Call loadClass method (no need to get_method_id explicitly, call_method resolves it)
+        let jni_bridge_class_obj = env
+            .call_method(
+                class_loader_obj,
+                "loadClass",
+                "(Ljava/lang/String;)Ljava/lang/Class;",
+                &[(&class_name).into()],
+            )
+            .expect("Failed to call loadClass")
+            .l()
+            .map_err(|e| jerr(env, e))?;
+
+        // Convert JObject to JClass for new_object
+        let jni_bridge_class = jni::objects::JClass::from(jni_bridge_class_obj);
+
+        // Instantiate JniBridge using its no-arg constructor
+        let jni_bridge_obj = env
+            .new_object(jni_bridge_class, "()V", &[])
+            .map_err(|e| jerr(env, e))?;
+
+        let arg2 = permission
+            .new_jobject(env)
+            .map_err(|e| jerr(env, e))
+            .unwrap();
+        let asdf = env.call_method(jni_bridge_obj, "checkSelfPermission", "(Landroid/content/Context;Ljava/lang/String;)I", &[(&context).try_into().unwrap(), (&arg2).try_into().unwrap()]).map_err(|e| jerr(env, e))?;
+        asdf.i().map(|v| v == 0).map_err(|e| jerr(env, e))
+    }
+
     /// Enables the bluetooth adapter
     pub fn enable(&mut self) {
         if !self.is_enabled() {

@@ -47,6 +47,7 @@ pub struct MainWindow {
     bluetooth_devs: BTreeMap<String, BluetoothConfig>,
     bluetooth_discovery: Option<bluetooth_rust::BluetoothDiscovery>,
     profile: Option<Result<bluetooth_rust::BluetoothRfcommProfile, String>>,
+    test: Result<bool, std::io::Error>,
 }
 
 impl MainWindow {
@@ -82,6 +83,7 @@ impl eframe::App for MainWindow {
                     self.bluetooth_discovery.take();
                 }
             }
+            ui.label(format!("Perm is {:?}", self.test));
             if let Some(profile) = &self.profile {
                 match profile {
                     Ok(_p) => {
@@ -140,6 +142,7 @@ impl MainWindow {
         let java = Java::make(app.clone());
         let java2 = Arc::new(Mutex::new(java));
         let b = bluetooth_rust::Bluetooth::new(java2.clone());
+        let perm = b.check_permission("android.permission.BLUETOOTH_CONNECT");
         let mut s = Self {
             local_storage: options.android_app.unwrap().internal_data_path(),
             settings: Err(AppConfigError::NotLoaded),
@@ -149,22 +152,24 @@ impl MainWindow {
             bluetooth_devs: BTreeMap::new(),
             bluetooth_discovery: None,
             profile: None,
+            test: perm,
         };
         s.load_config();
         if let Some(st) = s.bluetooth.supports_sync() {
-            let profile = st.register_rfcomm_profile(bluetooth_rust::BluetoothRfcommProfileSettings { 
-                uuid: "00001812-0000-1000-8000-00805f9b34fb".to_string(), 
-                name: Some("NES joystick".to_string()), 
-                service_uuid: None, 
-                channel: None, 
-                psm: None, 
-                authenticate: Some(true), 
-                authorize: Some(true), 
-                auto_connect: Some(true), 
-                sdp_record: None, 
-                sdp_version: None, 
-                sdp_features: None, 
-            });
+            let profile =
+                st.register_rfcomm_profile(bluetooth_rust::BluetoothRfcommProfileSettings {
+                    uuid: "00001812-0000-1000-8000-00805f9b34fb".to_string(),
+                    name: Some("NES joystick".to_string()),
+                    service_uuid: None,
+                    channel: None,
+                    psm: None,
+                    authenticate: Some(true),
+                    authorize: Some(true),
+                    auto_connect: Some(true),
+                    sdp_record: None,
+                    sdp_version: None,
+                    sdp_features: None,
+                });
             s.profile = Some(profile);
         }
         s
