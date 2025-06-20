@@ -48,6 +48,7 @@ pub struct MainWindow {
     bluetooth_discovery: Option<bluetooth_rust::BluetoothDiscovery>,
     profile: Option<Result<bluetooth_rust::BluetoothRfcommProfile, String>>,
     test: Result<bool, std::io::Error>,
+    app: AndroidApp,
 }
 
 impl MainWindow {
@@ -143,6 +144,7 @@ impl MainWindow {
         let java2 = Arc::new(Mutex::new(java));
         let b = bluetooth_rust::Bluetooth::new(java2.clone());
         let perm = b.check_permission("android.permission.BLUETOOTH_CONNECT");
+        let perm2 = b.try_get_permissions(app.clone(), "android.permission.BLUETOOTH_CONNECT");
         let mut s = Self {
             local_storage: options.android_app.unwrap().internal_data_path(),
             settings: Err(AppConfigError::NotLoaded),
@@ -152,7 +154,8 @@ impl MainWindow {
             bluetooth_devs: BTreeMap::new(),
             bluetooth_discovery: None,
             profile: None,
-            test: perm,
+            app,
+            test: perm2,
         };
         s.load_config();
         if let Some(st) = s.bluetooth.supports_sync() {
