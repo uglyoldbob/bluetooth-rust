@@ -219,7 +219,7 @@ pub struct BluetoothRfcommConnectable {
 impl super::BluetoothRfcommConnectableSyncTrait for BluetoothRfcommConnectable {
     fn accept(self, timeout: std::time::Duration) -> Result<crate::BluetoothStream, String> {
         let mut java2 = self.java.lock().unwrap();
-        let millis = (timeout.as_millis() as i64).into();
+        let millis = (timeout.as_millis() as i32).into();
         java2.use_env(|env, _context| {
             let socket = self.socket.get().unwrap().as_obj();
             let e = env

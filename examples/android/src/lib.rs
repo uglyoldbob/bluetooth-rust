@@ -47,7 +47,7 @@ pub struct MainWindow {
     bluetooth_devs: BTreeMap<String, BluetoothConfig>,
     bluetooth_discovery: Option<bluetooth_rust::BluetoothDiscovery>,
     profile: Option<Result<bluetooth_rust::BluetoothRfcommProfileSync, String>>,
-    bluetooth_stream: Option<bluetooth_rust::BluetoothStream>,
+    bluetooth_stream: Result<bluetooth_rust::BluetoothStream, String>,
     test: Result<bool, std::io::Error>,
     app: AndroidApp,
 }
@@ -70,6 +70,7 @@ impl eframe::App for MainWindow {
         //self.bluetooth.enable();
         ctx.request_repaint_after(std::time::Duration::from_millis(10));
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label(format!("Time is {:?}", std::time::Instant::now()));
             ui.label(
                 egui::RichText::new(format!("Size 1: {}", ui.pixels_per_point()))
                     .size(Self::font_size()),
@@ -85,22 +86,36 @@ impl eframe::App for MainWindow {
                     self.bluetooth_discovery.take();
                 }
             }
+            if ui.button("Set discoverable").clicked() {
+                if let Some(s) = self.bluetooth.supports_sync() {
+                    let _ = s.set_discoverable(true);
+                }
+            }
+            if ui.button("Unset discoverable").clicked() {
+                if let Some(s) = self.bluetooth.supports_sync() {
+                    let _ = s.set_discoverable(false);
+                }
+            }
             ui.label(format!("Perm is {:?}", self.test));
-            if let Some(profile) = &self.profile {
+            if let Some(profile) = &mut self.profile {
                 match profile {
                     Ok(p) => {
                         ui.label("Got a valid bluetooth profile");
-                        if self.bluetooth_stream.is_none() {
+                        if self.bluetooth_stream.is_err() {
                             let s = p.connectable();
                             if let Ok(s) = s {
+                                ui.label("Trying to accept");
                                 let t = s.accept(std::time::Duration::from_millis(100));
-                                if let Ok(t) = t {
-                                    self.bluetooth_stream = Some(t);
-                                }
+                                self.bluetooth_stream = t;
                             }
                         }
-                        if let Some(s) = &mut self.bluetooth_stream {
-                            ui.label("Got a bluetooth stream for stuff");
+                        match &mut self.bluetooth_stream {
+                            Ok(_) => {
+                                ui.label("Got a bluetooth stream for stuff");
+                            }
+                            Err(e) => {
+                                ui.label(format!("Error accepting: {}", e));
+                            }
                         }
                     }
                     Err(e) => {
@@ -169,15 +184,16 @@ impl MainWindow {
             profile: None,
             app,
             test: perm2,
+            bluetooth_stream: Err("Not setup yet".to_string()),
         };
         s.load_config();
         if let Some(st) = s.bluetooth.supports_sync() {
             let profile =
                 st.register_rfcomm_profile(bluetooth_rust::BluetoothRfcommProfileSettings {
-                    uuid: "00001812-0000-1000-8000-00805f9b34fb".to_string(),
+                    uuid: "00001124-0000-1000-8000-00805f9b34fb".to_string(),
                     name: Some("NES joystick".to_string()),
-                    service_uuid: None,
-                    channel: None,
+                    service_uuid: Some("00001124-0000-1000-8000-00805f9b34fb".to_string()),
+                    channel: Some(1),
                     psm: None,
                     authenticate: Some(true),
                     authorize: Some(true),
