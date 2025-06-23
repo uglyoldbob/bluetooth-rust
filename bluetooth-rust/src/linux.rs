@@ -46,11 +46,20 @@ impl super::BluetoothDeviceTrait for bluer::Device {
     }
 
     #[doc = " Attempt to get an rfcomm socket for the given uuid and seciruty setting"]
+    fn get_l2cap_socket(
+        &mut self,
+        uuid: crate::BluetoothUuid,
+        is_secure: bool,
+    ) -> Result<crate::BluetoothSocket, String> {
+        todo!()
+    }
+
+    #[doc = " Attempt to get an rfcomm socket for the given uuid and seciruty setting"]
     fn get_rfcomm_socket(
         &mut self,
         uuid: crate::BluetoothUuid,
         is_secure: bool,
-    ) -> Result<crate::BluetoothRfcommSocket, String> {
+    ) -> Result<crate::BluetoothSocket, String> {
         todo!()
     }
 }
@@ -127,6 +136,13 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
 
 #[async_trait::async_trait]
 impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
+    async fn register_l2cap_profile(
+        &self,
+        settings: super::BluetoothL2capProfileSettings,
+    ) -> Result<crate::BluetoothL2capProfileAsync, String> {
+        todo!()
+    }
+
     async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,

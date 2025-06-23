@@ -83,11 +83,65 @@ impl crate::BluetoothDeviceTrait for BluetoothDevice {
         Ok(s)
     }
 
+    fn get_l2cap_socket(
+        &mut self,
+        uuid: BluetoothUuid,
+        is_secure: bool,
+    ) -> Result<crate::BluetoothSocket, String> {
+        let uuid = uuid.as_str();
+        log::warn!("Checking rfcomm for {}", uuid);
+        let mut java = self.java.lock().unwrap();
+        if !self.rfcomm_sockets.contains_key(uuid) {
+            log::warn!("Building rfcomm for {}", uuid);
+            let socket = java
+                .use_env(|env, _context| {
+                    let uuid = uuid.new_jobject(env).map_err(|e| jerr(env, e))?;
+                    let uuid = env
+                        .call_static_method(
+                            "java/util/UUID",
+                            "fromString",
+                            "(Ljava/lang/String;)Ljava/util/UUID;",
+                            &[(&uuid).into()],
+                        )
+                        .get_object(env)
+                        .map_err(|e| jerr(env, e))?;
+
+                    let method_name = if is_secure {
+                        "createRfcommSocketToServiceRecord"
+                    } else {
+                        "createInsecureRfcommSocketToServiceRecord"
+                    };
+                    env.call_method(
+                        &self.internal,
+                        method_name,
+                        "(Ljava/util/UUID;)Landroid/bluetooth/BluetoothSocket;",
+                        &[(&uuid).into()],
+                    )
+                    .get_object(env)
+                    .globalize(env)
+                    // TODO: distinguish IOException and other unexpected exceptions
+                    .map_err(|e| jerr(env, e))
+                })
+                .map_err(|e| e.to_string())?;
+            drop(java);
+            log::warn!("Building2 rfcomm for {}", uuid);
+            let socket = BluetoothSocket::build(socket, self.java.clone(), uuid);
+            if let Ok(a) = socket {
+                self.rfcomm_sockets.insert(uuid.to_string(), a);
+            }
+            log::warn!("Done building rfcomm for {}", uuid);
+        }
+        self.rfcomm_sockets
+            .get_mut(uuid.into())
+            .map(|a| a.into())
+            .ok_or("Socket does not exist".to_string())
+    }
+
     fn get_rfcomm_socket(
         &mut self,
         uuid: BluetoothUuid,
         is_secure: bool,
-    ) -> Result<crate::BluetoothRfcommSocket, String> {
+    ) -> Result<crate::BluetoothSocket, String> {
         let uuid = uuid.as_str();
         log::warn!("Checking rfcomm for {}", uuid);
         let mut java = self.java.lock().unwrap();

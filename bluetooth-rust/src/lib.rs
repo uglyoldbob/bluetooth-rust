@@ -69,13 +69,36 @@ pub enum BluetoothResponse {
     Adapters(usize),
 }
 
-/// A bluetooth device
-#[cfg(target_os = "android")]
-pub struct BluetoothSocket<'a>(&'a mut android::BluetoothSocket);
-
 /// Settings for an rfcomm profile
 #[derive(Clone)]
 pub struct BluetoothRfcommProfileSettings {
+    /// The uuid for the profile
+    pub uuid: String,
+    /// User readable name for the profile
+    pub name: Option<String>,
+    /// The service uuid for the profile (can be the same as service)
+    pub service_uuid: Option<String>,
+    /// The channel to use
+    pub channel: Option<u16>,
+    /// PSM number used for UUIDS and SDP (if applicable)
+    pub psm: Option<u16>,
+    /// Is authentication required for a connection
+    pub authenticate: Option<bool>,
+    /// Is authorization required for a connection
+    pub authorize: Option<bool>,
+    /// For client profiles, This will force connection of the channel when a remote device is connected
+    pub auto_connect: Option<bool>,
+    /// manual SDP record
+    pub sdp_record: Option<String>,
+    /// SDP version
+    pub sdp_version: Option<u16>,
+    /// SDP profile features
+    pub sdp_features: Option<u16>,
+}
+
+/// Settings for an rfcomm profile
+#[derive(Clone)]
+pub struct BluetoothL2capProfileSettings {
     /// The uuid for the profile
     pub uuid: String,
     /// User readable name for the profile
@@ -132,6 +155,11 @@ pub trait AsyncBluetoothAdapterTrait {
         &self,
         settings: BluetoothRfcommProfileSettings,
     ) -> Result<BluetoothRfcommProfileAsync, String>;
+    /// Attempt to register a new l2cap profile
+    async fn register_l2cap_profile(
+        &self,
+        settings: BluetoothL2capProfileSettings,
+    ) -> Result<BluetoothL2capProfileAsync, String>;
     ///Get a list of paired bluetooth devices
     fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
@@ -150,6 +178,11 @@ pub trait SyncBluetoothAdapterTrait {
         &self,
         settings: BluetoothRfcommProfileSettings,
     ) -> Result<BluetoothRfcommProfileSync, String>;
+    /// Attempt to register a new lc2ap profile
+    fn register_l2cap_profile(
+        &self,
+        settings: BluetoothL2capProfileSettings,
+    ) -> Result<BluetoothL2capProfileAsync, String>;
     ///Get a list of paired bluetooth devices
     fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
@@ -196,12 +229,19 @@ pub trait BluetoothDeviceTrait {
     /// Retrieve the device pairing status
     fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
 
-    /// Attempt to get an rfcomm socket for the given uuid and seciruty setting
+    /// Attempt to get an rfcomm socket for the given uuid and security setting
     fn get_rfcomm_socket(
         &mut self,
         uuid: BluetoothUuid,
         is_secure: bool,
-    ) -> Result<BluetoothRfcommSocket, String>;
+    ) -> Result<BluetoothSocket, String>;
+
+    /// Attempt to get an l2cap socket for the given uuid and security setting
+    fn get_l2cap_socket(
+        &mut self,
+        uuid: BluetoothUuid,
+        is_secure: bool,
+    ) -> Result<BluetoothSocket, String>;
 }
 
 /// A bluetooth device
@@ -278,18 +318,6 @@ impl BluetoothAdapterBuilder {
             ));
         }
         Err("No builders available".to_string())
-    }
-}
-
-#[cfg(target_os = "android")]
-impl<'a> BluetoothSocket<'a> {
-    /// Attempts to connect to a remote device. When connected, it creates a
-    /// backgrond thread for reading data, which terminates itself on disconnection.
-    /// Do not reuse the socket after disconnection, because the underlying OS
-    /// implementation is probably incapable of reconnecting the device, just like
-    /// `java.net.Socket`.
-    pub fn connect(&mut self) -> Result<(), std::io::Error> {
-        self.0.connect()
     }
 }
 
@@ -382,6 +410,40 @@ pub enum BluetoothRfcommConnectableSync {
     Android(android::BluetoothRfcommConnectable),
 }
 
+
+/// The trait for bluetooth rfcomm objects that can be connected or accepted
+#[enum_dispatch::enum_dispatch]
+pub trait BluetoothL2capConnectableAsyncTrait {
+    /// Accept a connection from a bluetooth peer
+    async fn accept(self) -> Result<BluetoothStream, String>;
+}
+
+/// A bluetooth profile for rfcomm channels
+#[enum_dispatch::enum_dispatch(BluetoothL2capConnectableTrait)]
+pub enum BluetoothL2capConnectableAsync {
+    /// The android object for the profile
+    #[cfg(target_os = "android")]
+    Android(android::BluetoothRfcommConnectable),
+    /// The bluez library in linux is responsible for the profile
+    #[cfg(target_os = "linux")]
+    Bluez(bluer::rfcomm::ConnectRequest),
+}
+
+/// The trait for bluetooth rfcomm objects that can be connected or accepted
+#[enum_dispatch::enum_dispatch]
+pub trait BluetoothL2capConnectableSyncTrait {
+    /// Accept a connection from a bluetooth peer
+    fn accept(self, timeout: std::time::Duration) -> Result<BluetoothStream, String>;
+}
+
+/// A bluetooth profile for rfcomm channels
+#[enum_dispatch::enum_dispatch(BluetoothL2capConnectableSyncTrait)]
+pub enum BluetoothL2capConnectableSync {
+    /// The android object for the profile
+    #[cfg(target_os = "android")]
+    Android(android::BluetoothRfcommConnectable),
+}
+
 /// Allows building an object to connect to bluetooth devices
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothRfcommProfileAsyncTrait {
@@ -416,6 +478,26 @@ pub enum BluetoothRfcommProfileSync {
     Dummy(Dummy),
 }
 
+/// A bluetooth profile for rfcomm channels
+#[enum_dispatch::enum_dispatch(BluetoothL2capProfileAsyncTrait)]
+pub enum BluetoothL2capProfileAsync {
+    /// The bluez library in linux is responsible for the profile
+    #[cfg(target_os = "linux")]
+    Bluez(bluer::rfcomm::ProfileHandle),
+    /// A dummy handler
+    Dummy(Dummy),
+}
+
+/// A bluetooth profile for rfcomm channels
+#[enum_dispatch::enum_dispatch(BluetoothL2capProfileSyncTrait)]
+pub enum BluetoothL2capProfileSync {
+    /// Android rfcomm profile
+    #[cfg(target_os = "android")]
+    Android(android::BluetoothRfcommProfile),
+    /// A dummy handler
+    Dummy(Dummy),
+}
+
 /// A dummy struct for ensuring enums are not empty
 pub struct Dummy {}
 
@@ -433,11 +515,11 @@ impl BluetoothRfcommProfileAsyncTrait for Dummy {
 
 /// The common functions for all bluetooth rfcomm sockets
 #[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommSocketTrait {}
+pub trait BluetoothSocketTrait {}
 
 /// A bluetooth rfcomm socket
-#[enum_dispatch::enum_dispatch(BluetoothRfcommSocketTrait)]
-pub enum BluetoothRfcommSocket<'a> {
+#[enum_dispatch::enum_dispatch(BluetoothSocketTrait)]
+pub enum BluetoothSocket<'a> {
     /// The android based rfcomm socket
     #[cfg(target_os = "android")]
     Android(&'a mut android::BluetoothSocket),
@@ -445,3 +527,4 @@ pub enum BluetoothRfcommSocket<'a> {
     #[cfg(target_os = "linux")]
     Bluez(&'a mut linux::BluetoothRfcommSocket),
 }
+

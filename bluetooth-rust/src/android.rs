@@ -216,6 +216,31 @@ pub struct BluetoothRfcommConnectable {
     java: Arc<Mutex<super::Java>>,
 }
 
+impl super::BluetoothL2capConnectableSyncTrait for BluetoothRfcommConnectable {
+    fn accept(self, timeout: std::time::Duration) -> Result<crate::BluetoothStream, String> {
+        let mut java2 = self.java.lock().unwrap();
+        let millis = (timeout.as_millis() as i32).into();
+        java2.use_env(|env, _context| {
+            let socket = self.socket.get().unwrap().as_obj();
+            let e = env
+                .call_method(
+                    socket,
+                    "accept",
+                    "(I)Landroid/bluetooth/BluetoothSocket;",
+                    &[millis],
+                )
+                .get_object(env)
+                .map_err(|e| jerr(env, e).to_string())?;
+            let socket = env
+                .new_global_ref(&e)
+                .map_err(|e| jerr(env, e).to_string())?;
+            let s = RfcommStream::new(socket.into(), self.java.clone())?;
+            let comm = crate::BluetoothStream::Android(s);
+            Ok(comm)
+        })
+    }
+}
+
 impl super::BluetoothRfcommConnectableSyncTrait for BluetoothRfcommConnectable {
     fn accept(self, timeout: std::time::Duration) -> Result<crate::BluetoothStream, String> {
         let mut java2 = self.java.lock().unwrap();
@@ -281,6 +306,13 @@ impl super::BluetoothAdapterTrait for Bluetooth {
 }
 
 impl crate::SyncBluetoothAdapterTrait for Bluetooth {
+    fn register_l2cap_profile(
+        &self,
+        _settings: super::BluetoothL2capProfileSettings,
+    ) -> Result<crate::BluetoothL2capProfileAsync, String> {
+        todo!()
+    }
+
     fn register_rfcomm_profile(
         &self,
         settings: crate::BluetoothRfcommProfileSettings,
