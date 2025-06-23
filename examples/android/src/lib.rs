@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 use eframe::{NativeOptions, Renderer};
 
-use bluetooth_rust::{BluetoothAdapterTrait, Java};
+use bluetooth_rust::{BluetoothAdapterTrait, BluetoothRfcommConnectableSyncTrait, BluetoothRfcommProfileSyncTrait, Java};
 
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
@@ -46,7 +46,8 @@ pub struct MainWindow {
     known_uuids: BTreeMap<String, Vec<bluetooth_rust::BluetoothUuid>>,
     bluetooth_devs: BTreeMap<String, BluetoothConfig>,
     bluetooth_discovery: Option<bluetooth_rust::BluetoothDiscovery>,
-    profile: Option<Result<bluetooth_rust::BluetoothRfcommProfile, String>>,
+    profile: Option<Result<bluetooth_rust::BluetoothRfcommProfileSync, String>>,
+    bluetooth_stream: Option<bluetooth_rust::BluetoothStream>,
     test: Result<bool, std::io::Error>,
     app: AndroidApp,
 }
@@ -87,8 +88,20 @@ impl eframe::App for MainWindow {
             ui.label(format!("Perm is {:?}", self.test));
             if let Some(profile) = &self.profile {
                 match profile {
-                    Ok(_p) => {
+                    Ok(p) => {
                         ui.label("Got a valid bluetooth profile");
+                        if self.bluetooth_stream.is_none() {
+                            let s = p.connectable();
+                            if let Ok(s) = s {
+                                let t = s.accept(std::time::Duration::from_millis(100));
+                                if let Ok(t) = t {
+                                    self.bluetooth_stream = Some(t);
+                                }
+                            }
+                        }
+                        if let Some(s) = &mut self.bluetooth_stream {
+                            ui.label("Got a bluetooth stream for stuff");
+                        }
                     }
                     Err(e) => {
                         ui.label(format!("Failed to get a valid profile: {}", e));
@@ -143,7 +156,7 @@ impl MainWindow {
         let java = Java::make(app.clone());
         let java2 = Arc::new(Mutex::new(java));
         let b = bluetooth_rust::Bluetooth::new(java2.clone());
-        let perm = b.check_permission("android.permission.BLUETOOTH_CONNECT");
+        let _ = b.check_permission("android.permission.BLUETOOTH_CONNECT");
         let perm2 = b.try_get_permissions(app.clone(), "android.permission.BLUETOOTH_CONNECT");
         let mut s = Self {
             local_storage: options.android_app.unwrap().internal_data_path(),

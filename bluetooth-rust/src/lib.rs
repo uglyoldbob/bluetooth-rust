@@ -131,7 +131,7 @@ pub trait AsyncBluetoothAdapterTrait {
     async fn register_rfcomm_profile(
         &self,
         settings: BluetoothRfcommProfileSettings,
-    ) -> Result<BluetoothRfcommProfile, String>;
+    ) -> Result<BluetoothRfcommProfileAsync, String>;
     ///Get a list of paired bluetooth devices
     fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
@@ -149,7 +149,7 @@ pub trait SyncBluetoothAdapterTrait {
     fn register_rfcomm_profile(
         &self,
         settings: BluetoothRfcommProfileSettings,
-    ) -> Result<BluetoothRfcommProfile, String>;
+    ) -> Result<BluetoothRfcommProfileSync, String>;
     ///Get a list of paired bluetooth devices
     fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
@@ -351,14 +351,14 @@ impl BluetoothStream {
 
 /// The trait for bluetooth rfcomm objects that can be connected or accepted
 #[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommConnectableTrait {
+pub trait BluetoothRfcommConnectableAsyncTrait {
     /// Accept a connection from a bluetooth peer
     async fn accept(self) -> Result<BluetoothStream, String>;
 }
 
 /// A bluetooth profile for rfcomm channels
 #[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableTrait)]
-pub enum BluetoothRfcommConnectable {
+pub enum BluetoothRfcommConnectableAsync {
     /// The android object for the profile
     #[cfg(target_os = "android")]
     Android(android::BluetoothRfcommConnectable),
@@ -367,22 +367,68 @@ pub enum BluetoothRfcommConnectable {
     Bluez(bluer::rfcomm::ConnectRequest),
 }
 
-/// Allows building an object to connect to bluetooth devices
+/// The trait for bluetooth rfcomm objects that can be connected or accepted
 #[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommProfileTrait {
-    /// Get an object in order to accept a connection from or connect to a bluetooth peer
-    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectable, String>;
+pub trait BluetoothRfcommConnectableSyncTrait {
+    /// Accept a connection from a bluetooth peer
+    fn accept(self, timeout: std::time::Duration) -> Result<BluetoothStream, String>;
 }
 
 /// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothRfcommProfileTrait)]
-pub enum BluetoothRfcommProfile {
-    /// Android rfcomm profile
+#[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableSyncTrait)]
+pub enum BluetoothRfcommConnectableSync {
+    /// The android object for the profile
     #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommProfile),
+    Android(android::BluetoothRfcommConnectable),
+}
+
+/// Allows building an object to connect to bluetooth devices
+#[enum_dispatch::enum_dispatch]
+pub trait BluetoothRfcommProfileAsyncTrait {
+    /// Get an object in order to accept a connection from or connect to a bluetooth peer
+    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectableAsync, String>;
+}
+
+/// Allows building an object to connect to bluetooth devices
+#[enum_dispatch::enum_dispatch]
+pub trait BluetoothRfcommProfileSyncTrait {
+    /// Get an object in order to accept a connection from or connect to a bluetooth peer
+    fn connectable(&mut self) -> Result<BluetoothRfcommConnectableSync, String>;
+}
+
+/// A bluetooth profile for rfcomm channels
+#[enum_dispatch::enum_dispatch(BluetoothRfcommProfileAsyncTrait)]
+pub enum BluetoothRfcommProfileAsync {
     /// The bluez library in linux is responsible for the profile
     #[cfg(target_os = "linux")]
     Bluez(bluer::rfcomm::ProfileHandle),
+    /// A dummy handler
+    Dummy(Dummy),
+}
+
+/// A bluetooth profile for rfcomm channels
+#[enum_dispatch::enum_dispatch(BluetoothRfcommProfileSyncTrait)]
+pub enum BluetoothRfcommProfileSync {
+    /// Android rfcomm profile
+    #[cfg(target_os = "android")]
+    Android(android::BluetoothRfcommProfile),
+    /// A dummy handler
+    Dummy(Dummy),
+}
+
+/// A dummy struct for ensuring enums are not empty
+pub struct Dummy {}
+
+impl BluetoothRfcommProfileSyncTrait for Dummy {
+    fn connectable(&mut self) -> Result<BluetoothRfcommConnectableSync,String> {
+        unimplemented!()
+    }
+}
+
+impl BluetoothRfcommProfileAsyncTrait for Dummy {
+    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectableAsync,String> {
+        unimplemented!()
+    }
 }
 
 /// The common functions for all bluetooth rfcomm sockets

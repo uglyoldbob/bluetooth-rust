@@ -216,28 +216,27 @@ pub struct BluetoothRfcommConnectable {
     java: Arc<Mutex<super::Java>>,
 }
 
-impl super::BluetoothRfcommConnectableTrait for BluetoothRfcommConnectable {
-    async fn accept(self) -> Result<crate::BluetoothStream, String> {
-        tokio::task::block_in_place(|| {
-            let mut java2 = self.java.lock().unwrap();
-            java2.use_env(|env, _context| {
-                let socket = self.socket.get().unwrap().as_obj();
-                let e = env
-                    .call_method(
-                        socket,
-                        "accept",
-                        "()Landroid/bluetooth/BluetoothSocket;",
-                        &[],
-                    )
-                    .get_object(env)
-                    .map_err(|e| jerr(env, e).to_string())?;
-                let socket = env
-                    .new_global_ref(&e)
-                    .map_err(|e| jerr(env, e).to_string())?;
-                let s = RfcommStream::new(socket.into(), self.java.clone())?;
-                let comm = crate::BluetoothStream::Android(s);
-                Ok(comm)
-            })
+impl super::BluetoothRfcommConnectableSyncTrait for BluetoothRfcommConnectable {
+    fn accept(self, timeout: std::time::Duration) -> Result<crate::BluetoothStream, String> {
+        let mut java2 = self.java.lock().unwrap();
+        let millis = (timeout.as_millis() as i64).into();
+        java2.use_env(|env, _context| {
+            let socket = self.socket.get().unwrap().as_obj();
+            let e = env
+                .call_method(
+                    socket,
+                    "accept",
+                    "(I)Landroid/bluetooth/BluetoothSocket;",
+                    &[millis],
+                )
+                .get_object(env)
+                .map_err(|e| jerr(env, e).to_string())?;
+            let socket = env
+                .new_global_ref(&e)
+                .map_err(|e| jerr(env, e).to_string())?;
+            let s = RfcommStream::new(socket.into(), self.java.clone())?;
+            let comm = crate::BluetoothStream::Android(s);
+            Ok(comm)
         })
     }
 }
@@ -250,9 +249,9 @@ pub struct BluetoothRfcommProfile {
     java: Arc<Mutex<super::Java>>,
 }
 
-impl crate::BluetoothRfcommProfileTrait for BluetoothRfcommProfile {
-    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
-        Ok(crate::BluetoothRfcommConnectable::Android(
+impl crate::BluetoothRfcommProfileSyncTrait for BluetoothRfcommProfile {
+    fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectableSync, String> {
+        Ok(crate::BluetoothRfcommConnectableSync::Android(
             BluetoothRfcommConnectable {
                 socket: self.socket.clone(),
                 java: self.java.clone(),
@@ -285,7 +284,7 @@ impl crate::SyncBluetoothAdapterTrait for Bluetooth {
     fn register_rfcomm_profile(
         &self,
         settings: crate::BluetoothRfcommProfileSettings,
-    ) -> Result<crate::BluetoothRfcommProfile, String> {
+    ) -> Result<crate::BluetoothRfcommProfileSync, String> {
         let mut java2 = self.java.lock().unwrap();
         {
             java2.use_env(|env, context| {
@@ -371,7 +370,7 @@ impl crate::SyncBluetoothAdapterTrait for Bluetooth {
                     .new_global_ref(&e)
                     .map_err(|e| jerr(env, e).to_string())?;
                 log::error!("Register rfcomm 11");
-                Ok(crate::BluetoothRfcommProfile::Android(
+                Ok(crate::BluetoothRfcommProfileSync::Android(
                     BluetoothRfcommProfile {
                         socket: socket.into(),
                         java: self.java.clone(),

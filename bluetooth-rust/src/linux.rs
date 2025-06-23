@@ -7,7 +7,7 @@ use bluer::{AdapterEvent, DeviceProperty};
 use futures::FutureExt;
 use futures::StreamExt;
 
-impl super::BluetoothRfcommConnectableTrait for bluer::rfcomm::ConnectRequest {
+impl super::BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest {
     async fn accept(self) -> Result<crate::BluetoothStream, String> {
         bluer::rfcomm::ConnectRequest::accept(self)
             .map(|a| crate::BluetoothStream::Bluez(Box::pin(a)))
@@ -15,11 +15,11 @@ impl super::BluetoothRfcommConnectableTrait for bluer::rfcomm::ConnectRequest {
     }
 }
 
-impl super::BluetoothRfcommProfileTrait for bluer::rfcomm::ProfileHandle {
-    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
+impl super::BluetoothRfcommProfileAsyncTrait for bluer::rfcomm::ProfileHandle {
+    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectableAsync, String> {
         self.next()
             .await
-            .map(|a| a.into())
+            .map(|a| crate::BluetoothRfcommConnectableAsync::Bluez(a))
             .ok_or("Failed to get bluetooth connection".to_string())
     }
 }
@@ -130,11 +130,11 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
     async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,
-    ) -> Result<crate::BluetoothRfcommProfile, String> {
+    ) -> Result<crate::BluetoothRfcommProfileAsync, String> {
         self.session
             .register_profile(settings.try_into()?)
             .await
-            .map(|a| super::BluetoothRfcommProfile::Bluez(a.into()))
+            .map(|a| super::BluetoothRfcommProfileAsync::Bluez(a.into()))
             .map_err(|e| e.to_string())
     }
 
