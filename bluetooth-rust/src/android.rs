@@ -484,7 +484,8 @@ const BLUETOOTH_SERVICE: &str = "bluetooth";
 
 impl Bluetooth {
     /// constructs a new Self with the protected java instance
-    pub fn new(java: Arc<Mutex<super::Java>>) -> Self {
+    pub fn new(app: AndroidApp) -> Self {
+        let java = Arc::new(Mutex::new(Java::make(app)));
         let adapter = {
             let mut java2 = java.lock().unwrap();
             java2.use_env(|env, context| Self::get_adapter(env, &context).unwrap())

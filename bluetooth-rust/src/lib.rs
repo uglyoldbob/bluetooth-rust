@@ -306,13 +306,21 @@ impl BluetoothAdapterBuilder {
     }
 
     /// Do the build
-    pub async fn build(self) -> Result<BluetoothAdapter, String> {
+    pub fn build(self) -> Result<BluetoothAdapter, String> {
         #[cfg(target_os = "android")]
         {
-            let java = android::Java::make(self.app.unwrap());
             return Ok(BluetoothAdapter::Android(android::Bluetooth::new(
-                Arc::new(Mutex::new(java)),
+                self.app.unwrap(),
             )));
+        }
+        Err("No synchronous builders available".to_string())
+    }
+
+    /// Do the build
+    pub async fn async_build(self) -> Result<BluetoothAdapter, String> {
+        #[cfg(target_os = "android")]
+        {
+            return self.build();
         }
         #[cfg(target_os = "linux")]
         {
@@ -320,7 +328,7 @@ impl BluetoothAdapterBuilder {
                 linux::BluetoothHandler::new(self.s.unwrap()).await?,
             ));
         }
-        Err("No builders available".to_string())
+        Err("No async builders available".to_string())
     }
 }
 
