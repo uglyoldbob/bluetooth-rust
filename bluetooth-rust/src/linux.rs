@@ -74,6 +74,16 @@ pub struct BluetoothRfcommSocket {
     inner: u32,
 }
 
+impl crate::BluetoothSocketTrait for &mut BluetoothRfcommSocket {
+    fn is_connected(&self) -> Result<bool, std::io::Error> {
+        todo!()
+    }
+
+    fn connect(&mut self) -> Result<(), std::io::Error> {
+        todo!()
+    }
+}
+
 /// A struct for managing discovery of bluetooth devices
 pub struct BluetoothDiscovery {}
 

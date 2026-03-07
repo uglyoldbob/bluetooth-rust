@@ -39,6 +39,50 @@ impl std::fmt::Debug for BluetoothSocket {
     }
 }
 
+impl crate::BluetoothSocketTrait for &mut BluetoothSocket {
+    fn is_connected(&self) -> Result<bool, std::io::Error> {
+        let mut java2 = self.java.lock().unwrap();
+        java2.use_env(|env, _context| self.is_connected2(env))
+    }
+
+    fn connect(&mut self) -> Result<(), std::io::Error> {
+        use crate::BluetoothSocketTrait;
+        if self.is_connected()? {
+            return Ok(());
+        }
+        let mut java = self.java.lock().unwrap();
+        log::warn!("Connecting to {}", self.uuid);
+        let app = java.get_app();
+        let connected = java.use_env(|env, _context| {
+            env.call_method(&self.internal, "connect", "()V", &[])
+                .map_err(|e| jerr(env, e))
+                .inspect_err(|e| log::error!("Connect error is {:?}", e))?;
+            self.is_connected2(env)
+        })?;
+        log::warn!("Connected status is {}", connected);
+        if connected {
+            let socket = self.internal.clone();
+            let input_stream = self.input_stream.clone();
+            let arc_buf_read = self.buf_read.clone();
+            let arc_callback = self.read_callback.clone();
+            self.thread_read.replace(std::thread::spawn(move || {
+                let mut java = Java::make(app);
+                BluetoothSocket::read_loop(
+                    &mut java,
+                    socket,
+                    input_stream,
+                    arc_buf_read,
+                    arc_callback,
+                )
+            }));
+            log::warn!("Done connecting");
+            Ok(())
+        } else {
+            Err(std::io::Error::from(std::io::ErrorKind::NotConnected))
+        }
+    }
+}
+
 impl BluetoothSocket {
     const ARRAY_SIZE: usize = 32 * 1024;
 
@@ -97,52 +141,10 @@ impl BluetoothSocket {
 
     /// Gets the connection status of this socket.
     #[inline(always)]
-    pub fn is_connected(&self) -> Result<bool, std::io::Error> {
-        let mut java2 = self.java.lock().unwrap();
-        java2.use_env(|env, _context| self.is_connected2(env))
-    }
-
-    /// Gets the connection status of this socket.
-    #[inline(always)]
     fn is_connected2(&self, env: &mut jni::JNIEnv) -> Result<bool, std::io::Error> {
         env.call_method(&self.internal, "isConnected", "()Z", &[])
             .get_boolean()
             .map_err(|e| jerr(env, e))
-    }
-
-    /// Attempts to connect to a remote device. When connected, it creates a
-    /// backgrond thread for reading data, which terminates itself on disconnection.
-    /// Do not reuse the socket after disconnection, because the underlying OS
-    /// implementation is probably incapable of reconnecting the device, just like
-    /// `java.net.Socket`.
-    pub fn connect(&mut self) -> Result<(), std::io::Error> {
-        if self.is_connected()? {
-            return Ok(());
-        }
-        let mut java = self.java.lock().unwrap();
-        log::warn!("Connecting to {}", self.uuid);
-        let app = java.get_app();
-        let connected = java.use_env(|env, _context| {
-            env.call_method(&self.internal, "connect", "()V", &[])
-                .map_err(|e| jerr(env, e))
-                .inspect_err(|e| log::error!("Connect error is {:?}", e))?;
-            self.is_connected2(env)
-        })?;
-        log::warn!("Connected status is {}", connected);
-        if connected {
-            let socket = self.internal.clone();
-            let input_stream = self.input_stream.clone();
-            let arc_buf_read = self.buf_read.clone();
-            let arc_callback = self.read_callback.clone();
-            self.thread_read.replace(std::thread::spawn(move || {
-                let mut java = Java::make(app);
-                Self::read_loop(&mut java, socket, input_stream, arc_buf_read, arc_callback)
-            }));
-            log::warn!("Done connecting");
-            Ok(())
-        } else {
-            Err(std::io::Error::from(std::io::ErrorKind::NotConnected))
-        }
     }
 
     fn read_loop(
@@ -258,6 +260,7 @@ impl BluetoothSocket {
     /// Closes this socket and releases any system resources associated with it.
     /// If the stream is already closed then invoking this method has no effect.
     pub fn close(&mut self) -> Result<(), std::io::Error> {
+        use crate::BluetoothSocketTrait;
         use std::io::Write;
         if !self.is_connected()? {
             return Ok(());
@@ -278,6 +281,7 @@ impl BluetoothSocket {
 
 impl std::io::Read for BluetoothSocket {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use crate::BluetoothSocketTrait;
         if buf.is_empty() {
             return Ok(0);
         }
@@ -316,6 +320,7 @@ impl std::io::Read for BluetoothSocket {
 
 impl std::io::Write for BluetoothSocket {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use crate::BluetoothSocketTrait;
         if buf.is_empty() {
             return Ok(0);
         }

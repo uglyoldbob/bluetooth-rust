@@ -517,7 +517,49 @@ impl BluetoothRfcommProfileAsyncTrait for Dummy {
 
 /// The common functions for all bluetooth rfcomm sockets
 #[enum_dispatch::enum_dispatch]
-pub trait BluetoothSocketTrait {}
+pub trait BluetoothSocketTrait {
+    /// Is the socket connected
+    fn is_connected(&self) -> Result<bool, std::io::Error>;
+    /// connect the socket
+    fn connect(&mut self) -> Result<(), std::io::Error>;
+}
+
+impl<'a> std::io::Read for BluetoothSocket<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(target_os = "android")]
+            BluetoothSocket::Android(a) => a.read(buf),
+            #[cfg(target_os = "linux")]
+            BluetoothSocket::Bluez(b) => {
+                todo!()
+            }
+        }
+    }
+}
+
+impl<'a> std::io::Write for BluetoothSocket<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(target_os = "android")]
+            BluetoothSocket::Android(a) => a.write(buf),
+            #[cfg(target_os = "linux")]
+            BluetoothSocket::Bluez(b) => {
+                todo!()
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            #[cfg(target_os = "android")]
+            BluetoothSocket::Android(a) => a.flush(),
+            #[cfg(target_os = "linux")]
+            BluetoothSocket::Bluez(b) => {
+                todo!()
+            }
+        }
+    }
+}
 
 /// A bluetooth rfcomm socket
 #[enum_dispatch::enum_dispatch(BluetoothSocketTrait)]
