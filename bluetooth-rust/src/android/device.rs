@@ -14,7 +14,7 @@ pub struct BluetoothDevice {
     java: Arc<Mutex<Java>>,
 }
 
-impl BluetoothDevice {
+impl crate::BluetoothDeviceTrait for BluetoothDevice {
     fn run_sdp(&mut self) {
         let mut java = self.java.lock().unwrap();
         let _result = java.use_env(|env, _context| {
@@ -24,9 +24,7 @@ impl BluetoothDevice {
             dev_name.map_err(|e| jerr(env, e))
         });
     }
-}
 
-impl crate::BluetoothDeviceTrait for BluetoothDevice {
     fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error> {
         let p = self.get_parcel_uuids();
         match p {

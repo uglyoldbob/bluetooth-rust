@@ -487,9 +487,7 @@ impl Bluetooth {
     pub fn new(java: Arc<Mutex<super::Java>>) -> Self {
         let adapter = {
             let mut java2 = java.lock().unwrap();
-            java2.use_env(|env, context| {
-                Self::get_adapter(env, &context).unwrap()
-            })
+            java2.use_env(|env, context| Self::get_adapter(env, &context).unwrap())
         };
         Self {
             adapter,
@@ -522,29 +520,36 @@ impl Bluetooth {
     }
 
     /// Request permission if it is not present because we need it
-    pub fn try_get_permissions(&self, app: AndroidApp, permission: &str,) -> Result<bool, std::io::Error> {
+    pub fn try_get_permissions(
+        &self,
+        app: AndroidApp,
+        permission: &str,
+    ) -> Result<bool, std::io::Error> {
         let mut java = self.java.lock().unwrap();
         java.use_env(|env, context| {
             if !self.check_permission2(env, &context, permission)? {
                 let mut stat = false;
                 self.get_permission2(env, &context, permission, app)
-            }
-            else {
+            } else {
                 Ok(true)
             }
         })
     }
 
     /// Check to see if we have the specified permission
-    pub fn check_permission(&self, permission: &str,) -> Result<bool, std::io::Error> {
+    pub fn check_permission(&self, permission: &str) -> Result<bool, std::io::Error> {
         let mut java = self.java.lock().unwrap();
-        java.use_env(|env, context| {
-            self.check_permission2(env, &context, permission)
-        })
+        java.use_env(|env, context| self.check_permission2(env, &context, permission))
     }
 
     /// Attempt to get the permisssion needed
-    pub fn get_permission2(&self, env: &mut jni::JNIEnv, context: &jni::objects::JObject, permission: &str, app: AndroidApp, ) -> Result<bool, std::io::Error> {
+    pub fn get_permission2(
+        &self,
+        env: &mut jni::JNIEnv,
+        context: &jni::objects::JObject,
+        permission: &str,
+        app: AndroidApp,
+    ) -> Result<bool, std::io::Error> {
         // Get ClassLoader instance from activity
         let class_loader_obj = env
             .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
@@ -577,18 +582,31 @@ impl Bluetooth {
             .new_object(jni_bridge_class, "()V", &[])
             .map_err(|e| jerr(env, e))?;
 
-        let activity = unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr() as *mut _jobject) };
+        let activity =
+            unsafe { jni::objects::JObject::from_raw(app.activity_as_ptr() as *mut _jobject) };
 
         let arg2 = permission
             .new_jobject(env)
             .map_err(|e| jerr(env, e))
             .unwrap();
-        let asdf = env.call_method(jni_bridge_obj, "requestPermission", "(Landroid/app/Activity;Ljava/lang/String;)I", &[(&activity).try_into().unwrap(), (&arg2).try_into().unwrap()]).map_err(|e| jerr(env, e))?;
+        let asdf = env
+            .call_method(
+                jni_bridge_obj,
+                "requestPermission",
+                "(Landroid/app/Activity;Ljava/lang/String;)I",
+                &[(&activity).try_into().unwrap(), (&arg2).try_into().unwrap()],
+            )
+            .map_err(|e| jerr(env, e))?;
         asdf.i().map(|v| v == 0).map_err(|e| jerr(env, e))
     }
 
     /// Check to see if we have the specified permission
-    pub fn check_permission2(&self, env: &mut jni::JNIEnv, context: &jni::objects::JObject, permission: &str,) -> Result<bool, std::io::Error> {
+    pub fn check_permission2(
+        &self,
+        env: &mut jni::JNIEnv,
+        context: &jni::objects::JObject,
+        permission: &str,
+    ) -> Result<bool, std::io::Error> {
         // Get ClassLoader instance from activity
         let class_loader_obj = env
             .call_method(&context, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])
@@ -625,7 +643,14 @@ impl Bluetooth {
             .new_jobject(env)
             .map_err(|e| jerr(env, e))
             .unwrap();
-        let asdf = env.call_method(jni_bridge_obj, "checkSelfPermission", "(Landroid/content/Context;Ljava/lang/String;)I", &[(&context).try_into().unwrap(), (&arg2).try_into().unwrap()]).map_err(|e| jerr(env, e))?;
+        let asdf = env
+            .call_method(
+                jni_bridge_obj,
+                "checkSelfPermission",
+                "(Landroid/content/Context;Ljava/lang/String;)I",
+                &[(&context).try_into().unwrap(), (&arg2).try_into().unwrap()],
+            )
+            .map_err(|e| jerr(env, e))?;
         asdf.i().map(|v| v == 0).map_err(|e| jerr(env, e))
     }
 

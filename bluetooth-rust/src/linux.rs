@@ -25,6 +25,10 @@ impl super::BluetoothRfcommProfileAsyncTrait for bluer::rfcomm::ProfileHandle {
 }
 
 impl super::BluetoothDeviceTrait for bluer::Device {
+    fn run_sdp(&mut self) {
+        todo!()
+    }
+
     #[doc = " Get all known uuids for this device"]
     fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         todo!()
@@ -71,14 +75,12 @@ pub struct BluetoothRfcommSocket {
 }
 
 /// A struct for managing discovery of bluetooth devices
-pub struct BluetoothDiscovery {
-}
+pub struct BluetoothDiscovery {}
 
 impl BluetoothDiscovery {
     /// construct a new self
     fn new() -> Self {
-        Self {
-        }
+        Self {}
     }
 }
 

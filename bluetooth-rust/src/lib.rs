@@ -242,6 +242,9 @@ pub trait BluetoothDeviceTrait {
         uuid: BluetoothUuid,
         is_secure: bool,
     ) -> Result<BluetoothSocket, String>;
+
+    /// Run the service discovery protocol
+    fn run_sdp(&mut self);
 }
 
 /// A bluetooth device
@@ -410,7 +413,6 @@ pub enum BluetoothRfcommConnectableSync {
     Android(android::BluetoothRfcommConnectable),
 }
 
-
 /// The trait for bluetooth rfcomm objects that can be connected or accepted
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothL2capConnectableAsyncTrait {
@@ -502,13 +504,13 @@ pub enum BluetoothL2capProfileSync {
 pub struct Dummy {}
 
 impl BluetoothRfcommProfileSyncTrait for Dummy {
-    fn connectable(&mut self) -> Result<BluetoothRfcommConnectableSync,String> {
+    fn connectable(&mut self) -> Result<BluetoothRfcommConnectableSync, String> {
         unimplemented!()
     }
 }
 
 impl BluetoothRfcommProfileAsyncTrait for Dummy {
-    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectableAsync,String> {
+    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectableAsync, String> {
         unimplemented!()
     }
 }
@@ -527,4 +529,3 @@ pub enum BluetoothSocket<'a> {
     #[cfg(target_os = "linux")]
     Bluez(&'a mut linux::BluetoothRfcommSocket),
 }
-
