@@ -21,6 +21,9 @@ use winit::platform::android::activity::AndroidApp;
 #[cfg(target_os = "linux")]
 mod linux;
 
+#[cfg(target_os = "windows")]
+mod windows;
+
 mod bluetooth_uuid;
 pub use bluetooth_uuid::BluetoothUuid;
 
@@ -136,6 +139,9 @@ pub enum BluetoothDiscovery {
     /// Linux bluez library implementation
     #[cfg(target_os = "linux")]
     Bluez(linux::BluetoothDiscovery),
+    /// Windows implementation
+    #[cfg(target_os = "windows")]
+    Windows(windows::BluetoothDiscovery),
 }
 
 /// The address of a bluetooth adapter
@@ -256,6 +262,9 @@ pub enum BluetoothDevice {
     /// Bluetooth device on linux using the bluez library
     #[cfg(target_os = "linux")]
     Bluez(linux::LinuxBluetoothDevice),
+    /// Bluetooth device on Windows
+    #[cfg(target_os = "windows")]
+    Windows(windows::BluetoothDevice),
 }
 
 /// Represents a bluetooth adapter that communicates to bluetooth devices
@@ -267,6 +276,9 @@ pub enum BluetoothAdapter {
     /// On linux, bluetooth adapter using the bluez library
     #[cfg(target_os = "linux")]
     Bluez(linux::BluetoothHandler),
+    /// On Windows, bluetooth adapter using the windows crate
+    #[cfg(target_os = "windows")]
+    Windows(windows::BluetoothHandler),
 }
 
 /// A builder for `BluetoothAdapter`
@@ -328,6 +340,12 @@ impl BluetoothAdapterBuilder {
                 linux::BluetoothHandler::new(self.s.unwrap()).await?,
             ));
         }
+        #[cfg(target_os = "windows")]
+        {
+            return Ok(BluetoothAdapter::Windows(
+                windows::BluetoothHandler::new(self.s.unwrap()).await?,
+            ));
+        }
         Err("No async builders available".to_string())
     }
 }
@@ -340,6 +358,9 @@ pub enum BluetoothStream {
     /// Android code for a bluetooth stream
     #[cfg(target_os = "android")]
     Android(android::RfcommStream),
+    /// Windows RFCOMM stream
+    #[cfg(target_os = "windows")]
+    Windows(windows::WindowsRfcommStream),
 }
 
 impl BluetoothStream {
@@ -352,6 +373,8 @@ impl BluetoothStream {
             BluetoothStream::Bluez(pin) => Some(pin),
             #[cfg(target_os = "android")]
             BluetoothStream::Android(_pin) => None,
+            #[cfg(target_os = "windows")]
+            BluetoothStream::Windows(_pin) => None,
         }
     }
 
@@ -364,6 +387,8 @@ impl BluetoothStream {
             BluetoothStream::Bluez(pin) => Some(pin),
             #[cfg(target_os = "android")]
             BluetoothStream::Android(_pin) => None,
+            #[cfg(target_os = "windows")]
+            BluetoothStream::Windows(_pin) => None,
         }
     }
 
@@ -371,9 +396,11 @@ impl BluetoothStream {
     pub fn supports_sync_read(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn std::io::Read> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(pin) => None,
+            BluetoothStream::Bluez(_pin) => None,
             #[cfg(target_os = "android")]
             BluetoothStream::Android(pin) => Some(pin),
+            #[cfg(target_os = "windows")]
+            BluetoothStream::Windows(pin) => Some(pin),
         }
     }
 
@@ -381,9 +408,11 @@ impl BluetoothStream {
     pub fn supports_sync_write(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn std::io::Write> {
         match self.get_mut() {
             #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(pin) => None,
+            BluetoothStream::Bluez(_pin) => None,
             #[cfg(target_os = "android")]
             BluetoothStream::Android(pin) => Some(pin),
+            #[cfg(target_os = "windows")]
+            BluetoothStream::Windows(pin) => Some(pin),
         }
     }
 }
@@ -404,6 +433,9 @@ pub enum BluetoothRfcommConnectableAsync {
     /// The bluez library in linux is responsible for the profile
     #[cfg(target_os = "linux")]
     Bluez(bluer::rfcomm::ConnectRequest),
+    /// Windows RFCOMM connectable
+    #[cfg(target_os = "windows")]
+    Windows(windows::BluetoothRfcommConnectable),
 }
 
 /// The trait for bluetooth rfcomm objects that can be connected or accepted
@@ -474,6 +506,9 @@ pub enum BluetoothRfcommProfileAsync {
     /// The bluez library in linux is responsible for the profile
     #[cfg(target_os = "linux")]
     Bluez(bluer::rfcomm::ProfileHandle),
+    /// Windows RFCOMM profile
+    #[cfg(target_os = "windows")]
+    Windows(windows::BluetoothRfcommProfile),
     /// A dummy handler
     Dummy(Dummy),
 }
@@ -539,6 +574,8 @@ impl<'a> std::io::Read for BluetoothSocket<'a> {
             BluetoothSocket::Android(a) => a.read(buf),
             #[cfg(target_os = "linux")]
             BluetoothSocket::Bluez(b) => b.read(buf),
+            #[cfg(target_os = "windows")]
+            BluetoothSocket::Windows(w) => w.read(buf),
         }
     }
 }
@@ -550,6 +587,8 @@ impl<'a> std::io::Write for BluetoothSocket<'a> {
             BluetoothSocket::Android(a) => a.write(buf),
             #[cfg(target_os = "linux")]
             BluetoothSocket::Bluez(b) => b.write(buf),
+            #[cfg(target_os = "windows")]
+            BluetoothSocket::Windows(w) => w.write(buf),
         }
     }
 
@@ -559,6 +598,8 @@ impl<'a> std::io::Write for BluetoothSocket<'a> {
             BluetoothSocket::Android(a) => a.flush(),
             #[cfg(target_os = "linux")]
             BluetoothSocket::Bluez(b) => b.flush(),
+            #[cfg(target_os = "windows")]
+            BluetoothSocket::Windows(w) => w.flush(),
         }
     }
 }
@@ -572,4 +613,7 @@ pub enum BluetoothSocket<'a> {
     /// Linux using bluez library
     #[cfg(target_os = "linux")]
     Bluez(&'a mut linux::BluetoothRfcommSocket),
+    /// Windows bluetooth socket
+    #[cfg(target_os = "windows")]
+    Windows(&'a mut windows::BluetoothRfcommSocket),
 }
