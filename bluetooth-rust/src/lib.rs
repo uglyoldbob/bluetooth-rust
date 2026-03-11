@@ -255,7 +255,7 @@ pub enum BluetoothDevice {
     Android(android::BluetoothDevice),
     /// Bluetooth device on linux using the bluez library
     #[cfg(target_os = "linux")]
-    Bluez(bluer::Device),
+    Bluez(linux::LinuxBluetoothDevice),
 }
 
 /// Represents a bluetooth adapter that communicates to bluetooth devices
@@ -538,9 +538,7 @@ impl<'a> std::io::Read for BluetoothSocket<'a> {
             #[cfg(target_os = "android")]
             BluetoothSocket::Android(a) => a.read(buf),
             #[cfg(target_os = "linux")]
-            BluetoothSocket::Bluez(b) => {
-                todo!()
-            }
+            BluetoothSocket::Bluez(b) => b.read(buf),
         }
     }
 }
@@ -551,9 +549,7 @@ impl<'a> std::io::Write for BluetoothSocket<'a> {
             #[cfg(target_os = "android")]
             BluetoothSocket::Android(a) => a.write(buf),
             #[cfg(target_os = "linux")]
-            BluetoothSocket::Bluez(b) => {
-                todo!()
-            }
+            BluetoothSocket::Bluez(b) => b.write(buf),
         }
     }
 
@@ -562,9 +558,7 @@ impl<'a> std::io::Write for BluetoothSocket<'a> {
             #[cfg(target_os = "android")]
             BluetoothSocket::Android(a) => a.flush(),
             #[cfg(target_os = "linux")]
-            BluetoothSocket::Bluez(b) => {
-                todo!()
-            }
+            BluetoothSocket::Bluez(b) => b.flush(),
         }
     }
 }

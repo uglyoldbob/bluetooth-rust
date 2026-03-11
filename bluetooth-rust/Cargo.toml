@@ -17,7 +17,7 @@ serde = {version = "1.0.219", features = ["derive"]}
 tokio = { version = "1.40.0", features = ["full"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-bluer = {version = "0.17.3", features = ["bluetoothd", "rfcomm"] }
+bluer = {version = "0.17.3", features = ["bluetoothd", "rfcomm", "l2cap"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = {version = "0.21.1", features = ["invocation", "default"] }
