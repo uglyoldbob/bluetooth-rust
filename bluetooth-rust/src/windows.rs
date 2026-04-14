@@ -10,11 +10,8 @@
 //! equivalent) before constructing a `BluetoothHandler`.
 
 use windows::{
-    core::{GUID, HSTRING},
-    Devices::Bluetooth::{
-        BluetoothAdapter as WinBtAdapter, BluetoothDevice as WinBtDevice,
-    },
     Devices::Bluetooth::Rfcomm::{RfcommServiceId, RfcommServiceProvider},
+    Devices::Bluetooth::{BluetoothAdapter as WinBtAdapter, BluetoothDevice as WinBtDevice},
     Devices::Enumeration::{DeviceInformation, DeviceWatcher},
     Foundation::{EventRegistrationToken, TypedEventHandler},
     Networking::Sockets::{
@@ -22,6 +19,7 @@ use windows::{
         StreamSocketListenerConnectionReceivedEventArgs,
     },
     Storage::Streams::{DataReader, DataWriter, InputStreamOptions},
+    core::{GUID, HSTRING},
 };
 
 // ---------------------------------------------------------------------------
@@ -36,18 +34,19 @@ fn parse_uuid_to_guid(uuid_str: &str) -> Result<GUID, String> {
             "Invalid UUID (expected 32 hex chars after removing hyphens): {uuid_str}"
         ));
     }
-    let data1 =
-        u32::from_str_radix(&s[0..8], 16).map_err(|e| e.to_string())?;
-    let data2 =
-        u16::from_str_radix(&s[8..12], 16).map_err(|e| e.to_string())?;
-    let data3 =
-        u16::from_str_radix(&s[12..16], 16).map_err(|e| e.to_string())?;
+    let data1 = u32::from_str_radix(&s[0..8], 16).map_err(|e| e.to_string())?;
+    let data2 = u16::from_str_radix(&s[8..12], 16).map_err(|e| e.to_string())?;
+    let data3 = u16::from_str_radix(&s[12..16], 16).map_err(|e| e.to_string())?;
     let mut data4 = [0u8; 8];
     for i in 0..8 {
-        data4[i] = u8::from_str_radix(&s[16 + i * 2..18 + i * 2], 16)
-            .map_err(|e| e.to_string())?;
+        data4[i] = u8::from_str_radix(&s[16 + i * 2..18 + i * 2], 16).map_err(|e| e.to_string())?;
     }
-    Ok(GUID { data1, data2, data3, data4 })
+    Ok(GUID {
+        data1,
+        data2,
+        data3,
+        data4,
+    })
 }
 
 /// Convert a Windows Bluetooth address (u64, lower 48 bits) to a six-byte MAC
@@ -87,7 +86,11 @@ impl WindowsRfcommStream {
         reader.SetInputStreamOptions(InputStreamOptions::Partial)?;
         let output = socket.OutputStream()?;
         let writer = DataWriter::CreateDataWriter(&output)?;
-        Ok(Self { _socket: socket, reader, writer })
+        Ok(Self {
+            _socket: socket,
+            reader,
+            writer,
+        })
     }
 }
 
@@ -149,8 +152,7 @@ pub struct BluetoothRfcommConnectable {
 
 impl super::BluetoothRfcommConnectableAsyncTrait for BluetoothRfcommConnectable {
     async fn accept(self) -> Result<crate::BluetoothStream, String> {
-        let stream =
-            WindowsRfcommStream::new(self.socket).map_err(|e| e.to_string())?;
+        let stream = WindowsRfcommStream::new(self.socket).map_err(|e| e.to_string())?;
         Ok(crate::BluetoothStream::Windows(stream))
     }
 }
@@ -184,16 +186,14 @@ impl Drop for BluetoothRfcommProfile {
 }
 
 impl super::BluetoothRfcommProfileAsyncTrait for BluetoothRfcommProfile {
-    async fn connectable(
-        &mut self,
-    ) -> Result<crate::BluetoothRfcommConnectableAsync, String> {
+    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectableAsync, String> {
         self.rx
             .recv()
             .await
             .map(|socket| {
-                crate::BluetoothRfcommConnectableAsync::Windows(
-                    BluetoothRfcommConnectable { socket },
-                )
+                crate::BluetoothRfcommConnectableAsync::Windows(BluetoothRfcommConnectable {
+                    socket,
+                })
             })
             .ok_or_else(|| "Connection channel closed".to_string())
     }
@@ -238,9 +238,7 @@ pub struct BluetoothDevice {
 }
 
 impl super::BluetoothDeviceTrait for BluetoothDevice {
-    fn get_uuids(
-        &mut self,
-    ) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
+    fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         // UUIDs are obtained by calling GetRfcommServicesAsync() and collecting
         // the ServiceId GUIDs from each returned RfcommDeviceService — an async
         // operation not yet implemented here.
@@ -266,9 +264,7 @@ impl super::BluetoothDeviceTrait for BluetoothDevice {
         ))
     }
 
-    fn get_pair_state(
-        &self,
-    ) -> Result<crate::PairingStatus, std::io::Error> {
+    fn get_pair_state(&self) -> Result<crate::PairingStatus, std::io::Error> {
         let info = self
             .inner
             .DeviceInformation()
@@ -366,15 +362,11 @@ pub struct BluetoothHandler {
 }
 
 impl super::BluetoothAdapterTrait for BluetoothHandler {
-    fn supports_async(
-        &mut self,
-    ) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
+    fn supports_async(&mut self) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
         Some(self)
     }
 
-    fn supports_sync(
-        &mut self,
-    ) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
+    fn supports_sync(&mut self) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
         // All Windows BT APIs are inherently async; no sync adapter is provided.
         None
     }
@@ -388,8 +380,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
     ) -> Result<crate::BluetoothRfcommProfileAsync, String> {
         // 1. Build the RFCOMM service ID from the profile UUID.
         let guid = parse_uuid_to_guid(&settings.uuid)?;
-        let service_id =
-            RfcommServiceId::FromUuid(guid).map_err(|e| e.to_string())?;
+        let service_id = RfcommServiceId::FromUuid(guid).map_err(|e| e.to_string())?;
 
         // 2. Create the service provider; this registers an SDP record with the
         //    Bluetooth stack.
@@ -400,25 +391,22 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
 
         // 3. Create a socket listener and route accepted sockets through a
         //    bounded channel so callers can await them with `connectable()`.
-        let listener =
-            StreamSocketListener::new().map_err(|e| e.to_string())?;
+        let listener = StreamSocketListener::new().map_err(|e| e.to_string())?;
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamSocket>(16);
 
         let token = listener
-            .ConnectionReceived(
-                &TypedEventHandler::<
-                    StreamSocketListener,
-                    StreamSocketListenerConnectionReceivedEventArgs,
-                >::new(move |_sender, args| {
-                    if let Some(args) = args {
-                        if let Ok(socket) = args.Socket() {
-                            let _ = tx.try_send(socket);
-                        }
+            .ConnectionReceived(&TypedEventHandler::<
+                StreamSocketListener,
+                StreamSocketListenerConnectionReceivedEventArgs,
+            >::new(move |_sender, args| {
+                if let Some(args) = args {
+                    if let Ok(socket) = args.Socket() {
+                        let _ = tx.try_send(socket);
                     }
-                    Ok(())
-                }),
-            )
+                }
+                Ok(())
+            }))
             .map_err(|e| e.to_string())?;
 
         // 4. Bind the listener to the RFCOMM service name (= the UUID string
@@ -437,10 +425,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
             .map_err(|e| e.to_string())?;
 
         listener
-            .BindServiceNameWithProtectionLevelAsync(
-                &service_name,
-                protection_level,
-            )
+            .BindServiceNameWithProtectionLevelAsync(&service_name, protection_level)
             .map_err(|e| e.to_string())?
             .await
             .map_err(|e| e.to_string())?;
@@ -451,7 +436,12 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
             .map_err(|e| e.to_string())?;
 
         Ok(crate::BluetoothRfcommProfileAsync::Windows(
-            BluetoothRfcommProfile { provider, listener, rx, token },
+            BluetoothRfcommProfile {
+                provider,
+                listener,
+                rx,
+                token,
+            },
         ))
     }
 
@@ -467,8 +457,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
     }
 
     fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
-        let selector =
-            WinBtDevice::GetDeviceSelectorFromPairingState(true).ok()?;
+        let selector = WinBtDevice::GetDeviceSelectorFromPairingState(true).ok()?;
 
         let collection = futures::executor::block_on(async {
             DeviceInformation::FindAllAsyncAqsFilter(&selector)
@@ -496,9 +485,9 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
                     .await
                     .map_err(|e| e.to_string())
             }) {
-                devices.push(crate::BluetoothDevice::Windows(
-                    BluetoothDevice { inner: device },
-                ));
+                devices.push(crate::BluetoothDevice::Windows(BluetoothDevice {
+                    inner: device,
+                }));
             }
         }
         Some(devices)
@@ -515,9 +504,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
 
     async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
         match self.adapter.BluetoothAddress() {
-            Ok(addr) => vec![super::BluetoothAdapterAddress::Byte(
-                bt_u64_to_bytes(addr),
-            )],
+            Ok(addr) => vec![super::BluetoothAdapterAddress::Byte(bt_u64_to_bytes(addr))],
             Err(_) => vec![],
         }
     }
@@ -545,6 +532,9 @@ impl BluetoothHandler {
             .map_err(|e| e.to_string())?
             .await
             .map_err(|e| e.to_string())?;
-        Ok(Self { adapter, _sender: s })
+        Ok(Self {
+            adapter,
+            _sender: s,
+        })
     }
 }

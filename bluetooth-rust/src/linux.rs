@@ -260,11 +260,10 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let uuids = self
-                    .device
-                    .uuids()
-                    .await
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                let uuids =
+                    self.device.uuids().await.map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                    })?;
                 Ok(uuids
                     .unwrap_or_default()
                     .into_iter()
@@ -526,7 +525,9 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
             });
             if let Ok(devices) = result {
                 for dev in devices {
-                    list.push(crate::BluetoothDevice::Bluez(LinuxBluetoothDevice::new(dev)));
+                    list.push(crate::BluetoothDevice::Bluez(LinuxBluetoothDevice::new(
+                        dev,
+                    )));
                 }
             }
         }

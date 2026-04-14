@@ -365,10 +365,8 @@ pub enum BluetoothStream {
 
 impl BluetoothStream {
     /// Used to check to see if the object supports async read, and then use the functionality
-    pub fn supports_async_read(
-        self: std::pin::Pin<&mut Self>,
-    ) -> Option<&mut dyn tokio::io::AsyncRead> {
-        match self.get_mut() {
+    pub fn supports_async_read(&mut self) -> Option<&mut dyn tokio::io::AsyncRead> {
+        match self {
             #[cfg(target_os = "linux")]
             BluetoothStream::Bluez(pin) => Some(pin),
             #[cfg(target_os = "android")]
@@ -379,10 +377,8 @@ impl BluetoothStream {
     }
 
     /// Used to check to see if the object supports async write, and then use the functionality
-    pub fn supports_async_write(
-        self: std::pin::Pin<&mut Self>,
-    ) -> Option<&mut dyn tokio::io::AsyncWrite> {
-        match self.get_mut() {
+    pub fn supports_async_write(&mut self) -> Option<&mut dyn tokio::io::AsyncWrite> {
+        match self {
             #[cfg(target_os = "linux")]
             BluetoothStream::Bluez(pin) => Some(pin),
             #[cfg(target_os = "android")]
@@ -393,8 +389,8 @@ impl BluetoothStream {
     }
 
     /// Used to try to use synchronous read functionality
-    pub fn supports_sync_read(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn std::io::Read> {
-        match self.get_mut() {
+    pub fn supports_sync_read(&mut self) -> Option<&mut dyn std::io::Read> {
+        match self {
             #[cfg(target_os = "linux")]
             BluetoothStream::Bluez(_pin) => None,
             #[cfg(target_os = "android")]
@@ -405,8 +401,8 @@ impl BluetoothStream {
     }
 
     /// Used to try to use synchronous write functionality
-    pub fn supports_sync_write(self: std::pin::Pin<&mut Self>) -> Option<&mut dyn std::io::Write> {
-        match self.get_mut() {
+    pub fn supports_sync_write(&mut self) -> Option<&mut dyn std::io::Write> {
+        match self {
             #[cfg(target_os = "linux")]
             BluetoothStream::Bluez(_pin) => None,
             #[cfg(target_os = "android")]
