@@ -464,11 +464,11 @@ pub struct BluetoothHandler {
 }
 
 impl super::BluetoothAdapterTrait for BluetoothHandler {
-    fn supports_async(&mut self) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
+    fn supports_async(&self) -> Option<&dyn super::AsyncBluetoothAdapterTrait> {
         Some(self)
     }
 
-    fn supports_sync(&mut self) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
+    fn supports_sync(&self) -> Option<&dyn super::SyncBluetoothAdapterTrait> {
         None
     }
 }

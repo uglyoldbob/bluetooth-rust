@@ -203,9 +203,9 @@ pub trait SyncBluetoothAdapterTrait {
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothAdapterTrait {
     /// Returns Some when the async interface is supported
-    fn supports_async(&mut self) -> Option<&mut dyn AsyncBluetoothAdapterTrait>;
+    fn supports_async(&self) -> Option<&dyn AsyncBluetoothAdapterTrait>;
     /// Returns Some when the sync interface is supported
-    fn supports_sync(&mut self) -> Option<&mut dyn SyncBluetoothAdapterTrait>;
+    fn supports_sync(&self) -> Option<&dyn SyncBluetoothAdapterTrait>;
 }
 
 /// The pairing status of a bluetooth device
