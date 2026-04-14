@@ -363,6 +363,64 @@ pub enum BluetoothStream {
     Windows(windows::WindowsRfcommStream),
 }
 
+macro_rules! pin_match {
+    ($this:expr, $s:ident => $body:expr) => {
+        match $this.get_mut() {
+            #[cfg(target_os = "linux")]
+            BluetoothStream::Bluez($s) => $body,
+
+            #[cfg(target_os = "android")]
+            BluetoothStream::Android($s) => $body,
+
+            #[cfg(target_os = "windows")]
+            BluetoothStream::Windows($s) => $body,
+        }
+    };
+}
+
+impl tokio::io::AsyncWrite for BluetoothStream {
+    fn poll_write(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        pin_match!(self, s => {
+            // SAFETY: we delegate to inner stream directly
+            tokio::io::AsyncWrite::poll_write(std::pin::Pin::new(s), cx, buf)
+        })
+    }
+
+    fn poll_flush(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        pin_match!(self, s => {
+            tokio::io::AsyncWrite::poll_flush(std::pin::Pin::new(s), cx)
+        })
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        pin_match!(self, s => {
+            tokio::io::AsyncWrite::poll_shutdown(std::pin::Pin::new(s), cx)
+        })
+    }
+}
+
+impl tokio::io::AsyncRead for BluetoothStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        pin_match!(self, s => {
+            tokio::io::AsyncRead::poll_read(std::pin::Pin::new(s), cx, buf)
+        })
+    }
+}
+
 impl BluetoothStream {
     /// Used to check to see if the object supports async read, and then use the functionality
     pub fn supports_async_read(&mut self) -> Option<&mut dyn tokio::io::AsyncRead> {
@@ -414,6 +472,7 @@ impl BluetoothStream {
 }
 
 /// The trait for bluetooth rfcomm objects that can be connected or accepted
+#[async_trait::async_trait]
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothRfcommConnectableAsyncTrait {
     /// Accept a connection from a bluetooth peer
@@ -421,7 +480,7 @@ pub trait BluetoothRfcommConnectableAsyncTrait {
 }
 
 /// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableTrait)]
+#[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableAsyncTrait)]
 pub enum BluetoothRfcommConnectableAsync {
     /// The android object for the profile
     #[cfg(target_os = "android")]

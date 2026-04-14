@@ -10,6 +10,7 @@ use futures::StreamExt;
 // BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest
 // ────────────────────────────────────────────────────────────────────────────
 
+#[async_trait::async_trait]
 impl super::BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest {
     async fn accept(self) -> Result<crate::BluetoothStream, String> {
         bluer::rfcomm::ConnectRequest::accept(self)
