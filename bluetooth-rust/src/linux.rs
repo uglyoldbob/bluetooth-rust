@@ -1,6 +1,6 @@
 //! Linux specific bluetooth code
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use bluer::AdapterEvent;
 use futures::FutureExt;
@@ -134,7 +134,7 @@ impl BluetoothRfcommSocket {
     }
 }
 
-impl crate::BluetoothSocketTrait for &mut BluetoothRfcommSocket {
+impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
     fn is_connected(&self) -> Result<bool, std::io::Error> {
         Ok(self.connection.is_some())
     }
@@ -161,7 +161,9 @@ impl crate::BluetoothSocketTrait for &mut BluetoothRfcommSocket {
                         .connect(addr)
                         .await
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    log::info!("STREAM {:?} to {:?}", stream.as_ref().local_addr(), stream.peer_addr());
                     self.connection = Some(BluetoothConnection::Rfcomm(stream));
+                    log::info!("Got an rfcomm stream");
                 } else if let Some(psm) = self.l2cap_psm {
                     let addr = bluer::l2cap::SocketAddr::new(
                         self.device_addr,
@@ -230,34 +232,16 @@ impl std::io::Write for BluetoothRfcommSocket {
 pub struct LinuxBluetoothDevice {
     /// The underlying bluer device handle
     device: bluer::Device,
-    /// Open sockets keyed by the UUID string of the service they connect to
-    sockets: BTreeMap<String, BluetoothRfcommSocket>,
 }
 
 impl LinuxBluetoothDevice {
     /// Wrap a `bluer::Device`.
     pub fn new(device: bluer::Device) -> Self {
-        Self {
-            device,
-            sockets: BTreeMap::new(),
-        }
+        Self { device }
     }
 }
 
 impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
-    /// Trigger service-discovery for this device.
-    ///
-    /// BlueZ resolves SDP service records automatically when a device is
-    /// connected.  Calling this method ensures the device is connected so that
-    /// `get_uuids` returns fresh data.  Any connection errors are silently
-    /// ignored because the device may already be connected.
-    fn run_sdp(&mut self) {
-        let device = self.device.clone();
-        let _ = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move { device.connect().await })
-        });
-    }
-
     fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
@@ -323,22 +307,12 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     /// discovered via SDP for real services.
     fn get_l2cap_socket(
         &mut self,
-        uuid: crate::BluetoothUuid,
+        psm: u16,
         is_secure: bool,
-    ) -> Result<crate::BluetoothSocket<'_>, String> {
-        let uuid_str = uuid.as_str().to_string();
-        if !self.sockets.contains_key(&uuid_str) {
-            // TODO: perform a proper SDP query to resolve the PSM for `uuid`.
-            // For now a PSM of 1 is used as a placeholder.
-            let psm: u16 = 1;
-            let addr = self.device.address();
-            let socket = BluetoothRfcommSocket::new_l2cap(addr, psm, is_secure);
-            self.sockets.insert(uuid_str.clone(), socket);
-        }
-        self.sockets
-            .get_mut(&uuid_str)
-            .map(|s| crate::BluetoothSocket::Bluez(s))
-            .ok_or_else(|| "Socket does not exist".to_string())
+    ) -> Result<crate::BluetoothSocket, String> {
+        let addr = self.device.address();
+        let socket = BluetoothRfcommSocket::new_l2cap(addr, psm, is_secure);
+        Ok(crate::BluetoothSocket::Bluez(socket))
     }
 
     /// Return a socket suitable for an outgoing RFCOMM connection to the given
@@ -351,22 +325,12 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     /// services (e.g. by using `sdptool` or an external SDP library).
     fn get_rfcomm_socket(
         &mut self,
-        uuid: crate::BluetoothUuid,
+        channel: u8,
         is_secure: bool,
-    ) -> Result<crate::BluetoothSocket<'_>, String> {
-        let uuid_str = uuid.as_str().to_string();
-        if !self.sockets.contains_key(&uuid_str) {
-            // TODO: perform a proper SDP query to resolve the RFCOMM channel
-            // for `uuid`.  Channel 1 is used here as a placeholder.
-            let channel: u8 = 1;
-            let addr = self.device.address();
-            let socket = BluetoothRfcommSocket::new_rfcomm(addr, channel, is_secure);
-            self.sockets.insert(uuid_str.clone(), socket);
-        }
-        self.sockets
-            .get_mut(&uuid_str)
-            .map(|s| crate::BluetoothSocket::Bluez(s))
-            .ok_or_else(|| "Socket does not exist".to_string())
+    ) -> Result<crate::BluetoothSocket, String> {
+        let addr = self.device.address();
+        let socket = BluetoothRfcommSocket::new_rfcomm(addr, channel, is_secure);
+        Ok(crate::BluetoothSocket::Bluez(socket))
     }
 }
 

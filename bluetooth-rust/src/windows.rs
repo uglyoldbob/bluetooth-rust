@@ -318,7 +318,7 @@ pub struct BluetoothRfcommSocket {
     connected: bool,
 }
 
-impl crate::BluetoothSocketTrait for &mut BluetoothRfcommSocket {
+impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
     fn is_connected(&self) -> Result<bool, std::io::Error> {
         Ok(self.connected)
     }

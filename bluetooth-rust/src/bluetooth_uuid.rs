@@ -51,6 +51,30 @@ pub enum BluetoothUuid {
 }
 
 impl BluetoothUuid {
+    /// Get the 16-bit id
+    pub fn get_16_bit_id(&self) -> u16 {
+        match self {
+            BluetoothUuid::SPP => 0x1101,
+            BluetoothUuid::A2dpSource => 0x110a,
+            BluetoothUuid::HfpHs => 0x111e,
+            BluetoothUuid::ObexOpp => 0x1105,
+            BluetoothUuid::ObexFtp => 0x1106,
+            BluetoothUuid::ObexSync => 0x1104,
+            BluetoothUuid::A2dpSink => 0x110b,
+            BluetoothUuid::AvrcpRemote => 0x110e,
+            BluetoothUuid::ObexPse => 0x112f,
+            BluetoothUuid::HfpAg => 0x111f,
+            BluetoothUuid::ObexMas => 0x1132,
+            BluetoothUuid::ObexMns => 0x1133,
+            BluetoothUuid::Base => 0,
+            BluetoothUuid::NetworkingNap => 0x1116,
+            BluetoothUuid::HspHs => 0x1108,
+            BluetoothUuid::HspAg => 0x1112,
+            BluetoothUuid::AndroidAuto => 0x7a00,
+            BluetoothUuid::Unknown(s) => u16::from_str_radix(&s[4..8], 16).unwrap(),
+        }
+    }
+
     /// Get the uuid as a str reference
     pub fn as_str(&self) -> &str {
         match self {

@@ -27,6 +27,8 @@ mod windows;
 mod bluetooth_uuid;
 pub use bluetooth_uuid::BluetoothUuid;
 
+mod sdp;
+
 /// Commands issued to the library
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub enum BluetoothCommand {
@@ -220,6 +222,62 @@ pub enum PairingStatus {
     Unknown,
 }
 
+fn uuid16(uuid: u16) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.push(0x19); // UUID-16 type
+    v.extend_from_slice(&uuid.to_be_bytes());
+    v
+}
+
+fn build_sdp_request(uuid: u16, transaction_id: u16) -> Vec<u8> {
+    let mut pdu = Vec::new();
+
+    // PDU ID
+    pdu.push(0x06);
+
+    // placeholder length
+    let mut params = Vec::new();
+
+    // Transaction ID
+    params.extend_from_slice(&transaction_id.to_be_bytes());
+
+    // Parameter length placeholder (filled later)
+
+    // ServiceSearchPattern: UUID 0x1101 (SPP)
+    let uuid = uuid16(uuid);
+    let mut search = Vec::new();
+    search.push(0x35); // sequence
+    search.push(uuid.len() as u8);
+    search.extend_from_slice(&uuid);
+    params.extend_from_slice(&search);
+
+    // Attribute ID list (0x0000 - 0xFFFF for everything)
+    let mut attrs = Vec::new();
+    attrs.push(0x35);
+    attrs.push(7);
+    attrs.extend_from_slice(&[
+        0x09, 0x00, 0x00, // uint16 0x0000
+        0x09, 0xFF, 0xFF, // uint16 0xFFFF
+    ]);
+    params.extend_from_slice(&attrs);
+
+    // Max attribute bytes
+    params.extend_from_slice(&0xFFFFu16.to_be_bytes());
+
+    // Continuation state
+    params.push(0x00);
+
+    // Now patch length
+    let len = params.len() as u16;
+    let mut out = Vec::new();
+    out.push(0x06);
+    out.extend_from_slice(&transaction_id.to_be_bytes());
+    out.extend_from_slice(&len.to_be_bytes());
+    out.extend_from_slice(&params);
+
+    out
+}
+
 /// The trait that all bluetooth devices must implement
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothDeviceTrait {
@@ -238,19 +296,20 @@ pub trait BluetoothDeviceTrait {
     /// Attempt to get an rfcomm socket for the given uuid and security setting
     fn get_rfcomm_socket(
         &mut self,
-        uuid: BluetoothUuid,
+        channel: u8,
         is_secure: bool,
     ) -> Result<BluetoothSocket, String>;
 
     /// Attempt to get an l2cap socket for the given uuid and security setting
-    fn get_l2cap_socket(
-        &mut self,
-        uuid: BluetoothUuid,
-        is_secure: bool,
-    ) -> Result<BluetoothSocket, String>;
+    fn get_l2cap_socket(&mut self, psm: u16, is_secure: bool) -> Result<BluetoothSocket, String>;
 
     /// Run the service discovery protocol
-    fn run_sdp(&mut self);
+    fn run_sdp(&mut self, uuid: BluetoothUuid) -> Result<sdp::ServiceRecord, String> {
+        if let Ok(a) = self.get_address() {
+            return sdp::run_sdp(&a, uuid.get_16_bit_id()).map_err(|e| e.to_string());
+        }
+        Err("Sdp failed".to_string())
+    }
 }
 
 /// A bluetooth device
@@ -622,7 +681,7 @@ pub trait BluetoothSocketTrait {
     fn connect(&mut self) -> Result<(), std::io::Error>;
 }
 
-impl<'a> std::io::Read for BluetoothSocket<'a> {
+impl std::io::Read for BluetoothSocket {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
             #[cfg(target_os = "android")]
@@ -635,7 +694,7 @@ impl<'a> std::io::Read for BluetoothSocket<'a> {
     }
 }
 
-impl<'a> std::io::Write for BluetoothSocket<'a> {
+impl std::io::Write for BluetoothSocket {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
             #[cfg(target_os = "android")]
@@ -661,14 +720,14 @@ impl<'a> std::io::Write for BluetoothSocket<'a> {
 
 /// A bluetooth rfcomm socket
 #[enum_dispatch::enum_dispatch(BluetoothSocketTrait)]
-pub enum BluetoothSocket<'a> {
+pub enum BluetoothSocket {
     /// The android based rfcomm socket
     #[cfg(target_os = "android")]
-    Android(&'a mut android::BluetoothSocket),
+    Android(android::BluetoothSocket),
     /// Linux using bluez library
     #[cfg(target_os = "linux")]
-    Bluez(&'a mut linux::BluetoothRfcommSocket),
+    Bluez(linux::BluetoothRfcommSocket),
     /// Windows bluetooth socket
     #[cfg(target_os = "windows")]
-    Windows(&'a mut windows::BluetoothRfcommSocket),
+    Windows(windows::BluetoothRfcommSocket),
 }

@@ -1,7 +1,7 @@
 [package]
 name = "bluetooth-rust"
 description = "A bluetooth communication library"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2024"
 publish = ["crates-io"]
 repository = "https://github.com/uglyoldbob/bluetooth-rust.git"
@@ -9,8 +9,10 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 async-trait = "0.1.88"
+bytes = "1.11.1"
 enum_dispatch = "0.3.13"
 futures = "0.3.30"
+libc = "0.2.185"
 log = "0.4"
 ouroboros = "0.18.5"
 serde = {version = "1.0.219", features = ["derive"]}
@@ -34,3 +36,7 @@ windows = { version = "0.62", features = [
 jni = {version = "0.21.1", features = ["invocation", "default"] }
 jni-min-helper = "0.3.0"
 winit = { version = "0.30.7", features = [ "android-native-activity" ] }
+
+[dev-dependencies]
+simple_logger = "5.2.0"
+tlv_parser = "0.10.0"
