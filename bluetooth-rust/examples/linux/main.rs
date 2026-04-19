@@ -1158,18 +1158,17 @@ impl MessageClient {
         pkt
     }
 
-    pub fn register_notification(&mut self) -> bool {
+    pub fn register_notification(&mut self, mns_channel: u8) -> bool {
         let type_str = b"x-bt/MAP-NotificationRegistration\0";
-        let app_params = [0x01, 0x01, 0x01];
 
-        let mut pkt = vec![0x02, 0x00, 0x00]; // PUT | Final
+        let app_params = [
+            0x0E, 0x01, 0x01, // NotificationStatus = ON
+            0x0F, 0x01, 0x00, // MASInstanceID = 0
+        ];
 
-        // Android expects this exact order:
-        // 1. Connection-ID
-        // 2. Type
-        // 3. App Parameters
-        // 4. End-of-Body (Android requires this even if empty — length must be 3)
+        let mut pkt = vec![0x82, 0x00, 0x00]; // PUT | Final
 
+        pkt.push(0xCB);
         pkt.extend_from_slice(&self.message_handle.to_be_bytes());
 
         let type_len = (3 + type_str.len()) as u16;
@@ -1182,29 +1181,18 @@ impl MessageClient {
         pkt.extend_from_slice(&app_len.to_be_bytes());
         pkt.extend_from_slice(&app_params);
 
-        // Android source checks for body header presence
-        pkt.push(0x82); // End-of-Body
-        pkt.push(0x00);
-        pkt.push(0x00);
-        pkt.push(0x30); // length = 3
-
         let total = pkt.len() as u16;
         pkt[1] = (total >> 8) as u8;
         pkt[2] = (total & 0xFF) as u8;
 
-        log::info!("NotificationRegistration packet: {:02x?}", pkt);
-
+        log::info!("NotificationRegistration: {:02x?}", pkt);
         self.socket.write_all(&pkt).ok();
         self.socket.flush().ok();
 
-        if let Some(buf) = self.read_obex_packet() {
-            let code = buf[0];
-            log::info!(
-                "NotificationRegistration response: {:#X} raw: {:02x?}",
-                code,
-                &buf
-            );
-            (code & 0x7F) == 0x20
+        let data = self.read_obex_packet();
+        if let Some(data) = data {
+            log::info!("NotificationRegistration response: {:#X?}", data);
+            (data[0] & 0x7F) == 0x20
         } else {
             false
         }
@@ -1225,6 +1213,178 @@ fn try_map_connect(dev: &mut BluetoothDevice, channel: u8) -> Result<BluetoothSo
     }
 }
 
+pub struct MnsServer {
+    profile: bluetooth_rust::BluetoothRfcommProfileAsync,
+}
+
+impl MnsServer {
+    pub async fn new(
+        adapter: &bluetooth_rust::BluetoothAdapter,
+        channel: u16,
+    ) -> Result<Self, String> {
+        // Register an RFCOMM profile for MNS
+        // Check your crate's API for how to create a server profile
+        let psettings = bluetooth_rust::BluetoothRfcommProfileSettings {
+            uuid: bluetooth_rust::BluetoothUuid::ObexMns.as_str().to_string(),
+            name: Some("Obex Message Notification Service".to_string()),
+            service_uuid: Some(bluetooth_rust::BluetoothUuid::ObexMns.as_str().to_string()),
+            channel: Some(channel),
+            psm: None,
+            authenticate: Some(true),
+            authorize: Some(true),
+            auto_connect: Some(true),
+            sdp_record: None,
+            sdp_version: None,
+            sdp_features: None,
+        };
+        if let Some(adapter) = adapter.supports_async() {
+            let profile = adapter
+                .register_rfcomm_profile(psettings)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(Self { profile })
+        } else {
+            Err("Async not supported".to_string())
+        }
+    }
+
+    pub async fn run(mut self) {
+        log::info!("MNS server started, waiting for phone to connect...");
+        use bluetooth_rust::BluetoothRfcommProfileAsyncTrait;
+        loop {
+            match self.profile.connectable().await {
+                Ok(connectable) => {
+                    log::info!("Running mns now");
+                    use bluetooth_rust::BluetoothRfcommConnectableAsyncTrait;
+                    match connectable.accept().await {
+                        Ok(mut stream) => {
+                            log::info!("MNS: phone connected");
+                            tokio::spawn(async move {
+                                Self::handle_client(&mut stream).await;
+                            });
+                        }
+                        Err(e) => log::error!("MNS accept error: {}", e),
+                    }
+                }
+                Err(e) => {
+                    log::error!("Error running connectable: {}", e);
+                }
+            }
+        }
+    }
+
+    async fn handle_client(
+        stream: &mut (impl tokio::io::AsyncReadExt + tokio::io::AsyncWriteExt + Unpin),
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        // Read OBEX CONNECT from phone
+        let data = match Self::read_packet(stream).await {
+            Some(d) => d,
+            None => return,
+        };
+        log::info!("MNS CONNECT received: {:02x?}", data);
+
+        // Send OBEX CONNECT reply
+        let reply = Self::build_connect_reply();
+        stream.write_all(&reply).await.ok();
+
+        // Handle incoming PUT event reports
+        loop {
+            let data = match Self::read_packet(stream).await {
+                Some(d) => d,
+                None => {
+                    log::info!("MNS: phone disconnected");
+                    break;
+                }
+            };
+
+            let opcode = data[0];
+            match opcode {
+                0x02 | 0x82 => {
+                    // PUT or PUT|Final — event report
+                    let xml = extract_body(&data);
+                    log::info!("MNS event:\n{}", xml);
+                    Self::parse_event(&xml);
+
+                    // ACK with OK
+                    stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
+                }
+                0x81 => {
+                    // DISCONNECT
+                    stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
+                    break;
+                }
+                _ => {
+                    log::warn!("MNS unexpected opcode {:#X}", opcode);
+                    stream.write_all(&[0xC0, 0x00, 0x03]).await.ok();
+                }
+            }
+        }
+    }
+
+    async fn read_packet(stream: &mut (impl tokio::io::AsyncReadExt + Unpin)) -> Option<Vec<u8>> {
+        use tokio::io::AsyncReadExt;
+        let mut header = [0u8; 3];
+        stream.read_exact(&mut header).await.ok()?;
+        let len = u16::from_be_bytes([header[1], header[2]]) as usize;
+        if len < 3 {
+            return None;
+        }
+        let mut full = vec![0u8; len];
+        full[..3].copy_from_slice(&header);
+        if len > 3 {
+            stream.read_exact(&mut full[3..]).await.ok()?;
+        }
+        Some(full)
+    }
+
+    fn build_connect_reply() -> Vec<u8> {
+        let who: [u8; 16] = [
+            0xBB, 0x58, 0x2B, 0x40, 0x42, 0x0C, 0x11, 0xDB, 0xB0, 0xDE, 0x08, 0x00, 0x20, 0x0C,
+            0x9A, 0x66,
+        ];
+        let mut reply = vec![
+            0xA0, 0x00, 0x00, // OK + length placeholder
+            0x10, // OBEX version
+            0x00, // flags
+            0x10, 0x00, // max packet size
+        ];
+        let who_len = (3 + who.len()) as u16;
+        reply.push(0x4A); // WHO header
+        reply.extend_from_slice(&who_len.to_be_bytes());
+        reply.extend_from_slice(&who);
+        let total = reply.len() as u16;
+        reply[1] = (total >> 8) as u8;
+        reply[2] = (total & 0xFF) as u8;
+        reply
+    }
+
+    fn parse_event(xml: &str) {
+        // <MAP-event-report version="1.0">
+        //   <event type="NewMessage" handle="..." folder="..." msg_type="SMS_GSM"/>
+        // </MAP-event-report>
+        if let Some(start) = xml.find("<event ") {
+            if let Some(end) = xml[start..].find("/>") {
+                let tag = &xml[start..start + end + 2];
+                let get = |attr: &str| -> Option<String> {
+                    let needle = format!("{}=\"", attr);
+                    let s = tag.find(&needle)? + needle.len();
+                    let e = tag[s..].find('"')? + s;
+                    Some(tag[s..e].to_string())
+                };
+                log::info!(
+                    "MAP Event: type={:?} handle={:?} folder={:?} msg_type={:?}",
+                    get("type"),
+                    get("handle"),
+                    get("folder"),
+                    get("msg_type")
+                );
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), String> {
     simple_logger::SimpleLogger::new()
@@ -1235,6 +1395,10 @@ async fn main() -> Result<(), String> {
     let (s, r) = tokio::sync::mpsc::channel(10);
     ba.with_sender(s);
     let adapter = ba.async_build().await.map_err(|e| e.to_string())?;
+    let mns = MnsServer::new(&adapter, 12)
+        .await
+        .expect("Failed to build mns server");
+    tokio::spawn(async move { mns.run().await });
     let mut macs = Vec::new();
     if let Some(a) = adapter.supports_async() {
         if let Some(devs) = a.get_paired_devices() {
@@ -1276,7 +1440,7 @@ async fn main() -> Result<(), String> {
         log::info!("Building a map message client");
         let mut client = MessageClient::new(s);
         log::info!("Register for notifications");
-        let not = client.register_notification();
+        let not = client.register_notification(12);
         log::info!("Registered for notifications: {}", not);
         client.set_root();
         client.setpath("telecom");
@@ -1285,5 +1449,8 @@ async fn main() -> Result<(), String> {
         //client.get_folder_listing();
         client.get_messages();
     }
-    Ok(())
+    log::info!("Sleeping");
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
 }
