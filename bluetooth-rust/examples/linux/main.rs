@@ -466,71 +466,42 @@ impl MapGetMessagesListing {
     pub fn serialize(&self) -> Vec<u8> {
         let type_str = b"x-bt/MAP-msg-listing\0";
 
-        // Build app parameters TLV blob
-        let mut app_params: Vec<u8> = vec![
+        let mut app_params: Vec<u8> = Vec::new();
+        app_params.extend_from_slice(&[
             0x01,
             0x02,
             (self.max_list_count >> 8) as u8,
             (self.max_list_count & 0xFF) as u8,
+        ]);
+        app_params.extend_from_slice(&[
             0x02,
             0x02,
             (self.list_start_offset >> 8) as u8,
             (self.list_start_offset & 0xFF) as u8,
-            0x07,
-            0x01,
-            self.filter_message_type,
-            0x0A,
-            0x01,
-            self.filter_read_status,
-        ];
+        ]);
+        app_params.extend_from_slice(&[0x03, 0x01, self.filter_message_type]);
+        app_params.extend_from_slice(&[0x06, 0x01, self.filter_read_status]);
 
-        if let Some(subj_len) = self.subject_length {
-            app_params.extend_from_slice(&[0x03, 0x01, subj_len]);
-        }
+        let mut pkt = vec![0x83, 0x00, 0x00]; // GET | Final
 
-        if let Some(ref begin) = self.filter_period_begin {
-            let b = begin.as_bytes();
-            app_params.push(0x08);
-            app_params.push(b.len() as u8);
-            app_params.extend_from_slice(b);
-        }
-
-        if let Some(ref end) = self.filter_period_end {
-            let b = end.as_bytes();
-            app_params.push(0x09);
-            app_params.push(b.len() as u8);
-            app_params.extend_from_slice(b);
-        }
-
-        let mut pkt: Vec<u8> = Vec::new();
-
-        // Opcode
-        pkt.push(0x83);
-
-        // Placeholder for length (fill in later)
-        pkt.extend_from_slice(&[0x00, 0x00]);
-
-        // Connection-ID header (0xCB, 4-byte value, no length field)
         pkt.push(0xCB);
         pkt.extend_from_slice(&self.connection_id.to_be_bytes());
 
-        // Type header (0x42, byte sequence with 2-byte length)
+        // NO Name header — Android uses mCurrentFolder (set by SETPATH)
+
         let type_len = (3 + type_str.len()) as u16;
         pkt.push(0x42);
         pkt.extend_from_slice(&type_len.to_be_bytes());
         pkt.extend_from_slice(type_str);
 
-        // App Parameters header (0x4C)
         let app_len = (3 + app_params.len()) as u16;
         pkt.push(0x4C);
         pkt.extend_from_slice(&app_len.to_be_bytes());
         pkt.extend_from_slice(&app_params);
 
-        // Patch in total length
         let total_len = pkt.len() as u16;
         pkt[1] = (total_len >> 8) as u8;
         pkt[2] = (total_len & 0xFF) as u8;
-
         pkt
     }
 }
@@ -783,6 +754,97 @@ fn parse_msg_tag(tag: &str) -> Result<MapMessage, String> {
     })
 }
 
+pub fn build_get_folder_listing(connection_id: u32) -> Vec<u8> {
+    let type_str = b"x-obex/folder-listing\0"; // ← was x-bt/folderListing
+
+    let mut pkt = vec![0x83, 0x00, 0x00];
+
+    pkt.push(0xCB);
+    pkt.extend_from_slice(&connection_id.to_be_bytes());
+
+    let type_len = (3 + type_str.len()) as u16;
+    pkt.push(0x42);
+    pkt.extend_from_slice(&type_len.to_be_bytes());
+    pkt.extend_from_slice(type_str);
+
+    let total = pkt.len() as u16;
+    pkt[1] = (total >> 8) as u8;
+    pkt[2] = (total & 0xFF) as u8;
+    pkt
+}
+
+pub fn extract_body(data: &[u8]) -> String {
+    if data.len() < 3 {
+        return String::new();
+    }
+
+    let packet_length = u16::from_be_bytes([data[1], data[2]]) as usize;
+    let data = &data[..packet_length.min(data.len())];
+
+    let mut pos = 3;
+    let mut body = Vec::new();
+
+    while pos < data.len() {
+        if pos >= data.len() {
+            break;
+        }
+        let header_id = data[pos];
+        pos += 1;
+
+        match header_id {
+            // Body (0x48) or End-of-Body (0x49)
+            0x48 | 0x49 => {
+                if pos + 2 > data.len() {
+                    break;
+                }
+                let len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                pos += 2;
+                let data_len = len.saturating_sub(3);
+                if pos + data_len > data.len() {
+                    break;
+                }
+                body.extend_from_slice(&data[pos..pos + data_len]);
+                pos += data_len;
+            }
+
+            // 4-byte value headers (Connection-ID etc.)
+            id if (id & 0xC0) == 0xC0 => {
+                if pos + 4 > data.len() {
+                    break;
+                }
+                pos += 4;
+            }
+
+            // Byte-sequence headers (2-byte length prefix)
+            id if (id & 0xC0) == 0x40 || (id & 0xC0) == 0x00 => {
+                if pos + 2 > data.len() {
+                    break;
+                }
+                let len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                if len < 3 {
+                    break;
+                }
+                pos += len - 1; // -1 because we already consumed the header_id byte
+            }
+
+            // 1-byte value headers
+            id if (id & 0xC0) == 0x80 => {
+                if pos + 1 > data.len() {
+                    break;
+                }
+                pos += 1;
+            }
+
+            _ => break,
+        }
+    }
+
+    String::from_utf8(body.clone()).unwrap_or_else(|_| {
+        // If not valid UTF-8, show hex for debugging
+        body.iter().map(|b| format!("{:02X} ", b)).collect()
+    })
+}
+
 struct MessageClient {
     socket: BluetoothSocket,
     message_handle: u32,
@@ -798,7 +860,7 @@ impl MessageClient {
             0x9A, 0x66,
         ];
 
-        let packet = ObexConnect::new(0x1000).target(&mas_obex_uuid).build();
+        let packet = ObexConnect::new(0x8000).target(&mas_obex_uuid).build();
         let a = socket.write_all(&packet);
         let b = socket.flush();
         log::info!("Sent data: {:?} {:?} {:x?}", a, b, packet);
@@ -822,14 +884,129 @@ impl MessageClient {
         }
     }
 
-    pub fn setpath(&mut self, p: &str) {
+    /// Read exactly one complete OBEX packet
+    fn read_obex_packet(&mut self) -> Option<Vec<u8>> {
+        // Read the 3-byte fixed header first
+        let mut header = [0u8; 3];
+        self.socket.read_exact(&mut header).ok()?;
+
+        let packet_len = u16::from_be_bytes([header[1], header[2]]) as usize;
+
+        if packet_len < 3 {
+            log::error!("Invalid packet length: {}", packet_len);
+            return None;
+        }
+
+        let remaining = packet_len - 3;
+        let mut full = vec![0u8; packet_len];
+        full[0] = header[0];
+        full[1] = header[1];
+        full[2] = header[2];
+
+        if remaining > 0 {
+            self.socket.read_exact(&mut full[3..]).ok()?;
+        }
+
+        log::info!("Read packet: code={:#X} len={}", full[0], packet_len);
+        Some(full)
+    }
+
+    pub fn setpath(&mut self, p: &str) -> bool {
         let p = SetpathDirection::Child(p.to_string()).build(Some(self.message_handle));
         self.socket.write_all(&p);
         self.socket.flush();
-        let mut buf = [0u8; 1024];
-        if let Ok(a) = self.socket.read(&mut buf) {
-            log::info!("READ DATA {:?} BYTES {:x?}", a, &buf[0..a]);
+        if let Some(buf) = self.read_obex_packet() {
+            log::info!("READ DATA {:?} BYTES {:x?}", buf.len(), buf);
+            true
+        } else {
+            false
         }
+    }
+
+    pub fn try_get_messages(&mut self) -> bool {
+        let req = MapGetMessagesListing {
+            connection_id: self.message_handle,
+            max_list_count: 0, // just get the count, no XML body
+            list_start_offset: 0,
+            filter_message_type: 0x00,
+            filter_read_status: 0x00,
+            subject_length: None,
+            filter_period_begin: None,
+            filter_period_end: None,
+        };
+        let p = req.serialize();
+        self.socket.write_all(&p).ok();
+        self.socket.flush().ok();
+        if let Some(buf) = self.read_obex_packet() {
+            let code = buf[0];
+            log::info!("get_messages response: {:#X}", code);
+            return (code & 0x7F) == 0x20;
+        }
+        false
+    }
+
+    pub fn set_root(&mut self) -> bool {
+        log::info!("SETPATH -> root (empty name)");
+        let mut pkt = vec![0x85, 0x00, 0x00]; // SETPATH | Final
+        pkt.push(0x00); // flags = 0x00 (not backup)
+        pkt.push(0x00); // constants
+
+        // Connection-ID
+        pkt.push(0xCB);
+        pkt.extend_from_slice(&self.message_handle.to_be_bytes());
+
+        // Empty Name header — this triggers root navigation per Android source
+        let empty_utf16 = [0x00u8, 0x00]; // just null terminator
+        let name_len = (3 + empty_utf16.len()) as u16;
+        pkt.push(0x01);
+        pkt.extend_from_slice(&name_len.to_be_bytes());
+        pkt.extend_from_slice(&empty_utf16);
+
+        let total = pkt.len() as u16;
+        pkt[1] = (total >> 8) as u8;
+        pkt[2] = (total & 0xFF) as u8;
+
+        self.socket.write_all(&pkt).ok();
+        self.socket.flush().ok();
+
+        if let Some(buf) = self.read_obex_packet() {
+            let code = buf[0];
+            log::info!("set_root response: {:#X}", code);
+            (code & 0x7F) == 0x20
+        } else {
+            false
+        }
+    }
+
+    pub fn go_to_root(&mut self) {
+        // Send parent repeatedly until we get an error (means we're at root)
+        for _ in 0..10 {
+            let pkt = SetpathDirection::Parent.build(Some(self.message_handle));
+            self.socket.write_all(&pkt).ok();
+            self.socket.flush().ok();
+            if let Some(buf) = self.read_obex_packet() {
+                let code = buf[0];
+                log::info!("go_to_root parent step: {:#X}", code);
+                if (code & 0x7F) != 0x20 {
+                    break; // hit the top
+                }
+            }
+        }
+    }
+
+    pub fn get_folder_listing(&mut self) -> String {
+        let p = build_get_folder_listing(self.message_handle);
+        log::info!("Packet to list folder: {:x?}", p);
+        self.socket.write_all(&p).ok();
+        self.socket.flush().ok();
+        let mut buf = [0u8; 4096];
+        if let Some(buf) = self.read_obex_packet() {
+            log::info!("FOLDER LISTING RESPONSE CODE: {:#X}", buf[0]);
+            let xml = extract_body(&buf);
+            log::info!("FOLDER LISTING XML:\n{}", xml);
+            return xml;
+        }
+        String::new()
     }
 
     pub fn get_messages(&mut self) {
@@ -837,31 +1014,199 @@ impl MessageClient {
             connection_id: self.message_handle,
             max_list_count: 127,
             list_start_offset: 0,
-            filter_message_type: 0x00, // all types
-            filter_read_status: 0x00,  // all messages
+            filter_message_type: 0x00,
+            filter_read_status: 0x00,
             subject_length: Some(50),
             filter_period_begin: None,
             filter_period_end: None,
         };
-        let p = req.serialize();
-        log::info!("Sending get message listing");
-        self.socket.write_all(&p);
-        self.socket.flush();
-        let mut buf = [0u8; 1024];
-        if let Ok(a) = self.socket.read(&mut buf) {
-            log::info!("READ DATA {:?} BYTES {:x?}", a, &buf[0..a]);
-            match MapListingResponse::parse(&buf[0..a]) {
-                Ok(resp) => {
-                    log::info!("LISTING: {:?}", resp);
-                    println!("Success:       {}", resp.is_success());
-                    println!("Connection ID: {:?}", resp.connection_id);
-                    println!("New Message:   {:?}", resp.app_params.new_message);
-                    println!("Device Time:   {:?}", resp.app_params.mse_time);
-                    println!("Message Count: {}", resp.messages.len());
-                    println!("XML:\n{}", resp.xml_body);
+
+        self.socket.write_all(&req.serialize()).ok();
+        self.socket.flush().ok();
+
+        let mut full_body: Vec<u8> = Vec::new();
+        let mut app_params_out: Option<MapListingAppParams> = None;
+        let mut first = true;
+
+        loop {
+            let data = match self.read_obex_packet() {
+                Some(d) => d,
+                None => {
+                    log::error!("Failed to read packet");
+                    break;
                 }
-                Err(e) => eprintln!("Error: {}", e),
+            };
+
+            let response_code = data[0];
+            let is_final = response_code == 0xA0;
+            let is_continue = response_code == 0x90;
+
+            log::info!(
+                "Packet code={:#X} total_len={} final={} continue={}",
+                response_code,
+                data.len(),
+                is_final,
+                is_continue
+            );
+
+            // Walk headers
+            let mut pos = 3;
+            while pos < data.len() {
+                let header_id = data[pos];
+                pos += 1;
+
+                match header_id {
+                    0xCB => {
+                        if pos + 4 > data.len() {
+                            break;
+                        }
+                        pos += 4;
+                    }
+                    0x4C => {
+                        if pos + 2 > data.len() {
+                            break;
+                        }
+                        let len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                        pos += 2;
+                        let end = (pos + len - 3).min(data.len());
+                        if first {
+                            app_params_out = Some(parse_map_listing_app_params(&data[pos..end]));
+                        }
+                        pos = end;
+                    }
+                    0x48 | 0x49 => {
+                        if pos + 2 > data.len() {
+                            break;
+                        }
+                        let len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                        pos += 2;
+                        let data_len = len.saturating_sub(3);
+                        let end = (pos + data_len).min(data.len());
+                        full_body.extend_from_slice(&data[pos..end]);
+                        pos = end;
+                    }
+                    id if (id & 0xC0) == 0xC0 => {
+                        if pos + 4 > data.len() {
+                            break;
+                        }
+                        pos += 4;
+                    }
+                    id if (id & 0xC0) == 0x40 || (id & 0xC0) == 0x00 => {
+                        if pos + 2 > data.len() {
+                            break;
+                        }
+                        let len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
+                        if len < 3 {
+                            break;
+                        }
+                        pos += len - 1;
+                    }
+                    id if (id & 0xC0) == 0x80 => {
+                        if pos + 1 > data.len() {
+                            break;
+                        }
+                        pos += 1;
+                    }
+                    _ => break,
+                }
             }
+
+            first = false;
+
+            if is_final {
+                log::info!("Final packet, done.");
+                break;
+            }
+
+            if is_continue {
+                // Send empty GET to pull next chunk
+                let cont = self.build_get_continue();
+                self.socket.write_all(&cont).ok();
+                self.socket.flush().ok();
+            } else {
+                log::error!("Unexpected code {:#X}", response_code);
+                break;
+            }
+        }
+
+        let xml = String::from_utf8(full_body).unwrap_or_default();
+        let messages = parse_msg_listing_xml(&xml);
+
+        log::info!(
+            "XML length: {} bytes, messages: {}",
+            xml.len(),
+            messages.len()
+        );
+        for msg in &messages {
+            println!(
+                "[{:?}] from={} subject={}",
+                msg.msg_type,
+                msg.sender_name.as_deref().unwrap_or("?"),
+                msg.subject.as_deref().unwrap_or("(no subject)")
+            );
+        }
+    }
+
+    /// Empty GET request to continue a multi-packet response
+    fn build_get_continue(&self) -> Vec<u8> {
+        let mut pkt = vec![0x83, 0x00, 0x00]; // GET | Final
+        pkt.push(0xCB);
+        pkt.extend_from_slice(&self.message_handle.to_be_bytes());
+        let total = pkt.len() as u16;
+        pkt[1] = (total >> 8) as u8;
+        pkt[2] = (total & 0xFF) as u8;
+        pkt
+    }
+
+    pub fn register_notification(&mut self) -> bool {
+        let type_str = b"x-bt/MAP-NotificationRegistration\0";
+        let app_params = [0x01, 0x01, 0x01];
+
+        let mut pkt = vec![0x02, 0x00, 0x00]; // PUT | Final
+
+        // Android expects this exact order:
+        // 1. Connection-ID
+        // 2. Type
+        // 3. App Parameters
+        // 4. End-of-Body (Android requires this even if empty — length must be 3)
+
+        pkt.extend_from_slice(&self.message_handle.to_be_bytes());
+
+        let type_len = (3 + type_str.len()) as u16;
+        pkt.push(0x42);
+        pkt.extend_from_slice(&type_len.to_be_bytes());
+        pkt.extend_from_slice(type_str);
+
+        let app_len = (3 + app_params.len()) as u16;
+        pkt.push(0x4C);
+        pkt.extend_from_slice(&app_len.to_be_bytes());
+        pkt.extend_from_slice(&app_params);
+
+        // Android source checks for body header presence
+        pkt.push(0x82); // End-of-Body
+        pkt.push(0x00);
+        pkt.push(0x00);
+        pkt.push(0x30); // length = 3
+
+        let total = pkt.len() as u16;
+        pkt[1] = (total >> 8) as u8;
+        pkt[2] = (total & 0xFF) as u8;
+
+        log::info!("NotificationRegistration packet: {:02x?}", pkt);
+
+        self.socket.write_all(&pkt).ok();
+        self.socket.flush().ok();
+
+        if let Some(buf) = self.read_obex_packet() {
+            let code = buf[0];
+            log::info!(
+                "NotificationRegistration response: {:#X} raw: {:02x?}",
+                code,
+                &buf
+            );
+            (code & 0x7F) == 0x20
+        } else {
+            false
         }
     }
 }
@@ -930,9 +1275,14 @@ async fn main() -> Result<(), String> {
     for s in macs {
         log::info!("Building a map message client");
         let mut client = MessageClient::new(s);
+        log::info!("Register for notifications");
+        let not = client.register_notification();
+        log::info!("Registered for notifications: {}", not);
+        client.set_root();
         client.setpath("telecom");
         client.setpath("msg");
-        client.setpath("INBOX");
+        client.setpath("inbox");
+        //client.get_folder_listing();
         client.get_messages();
     }
     Ok(())
