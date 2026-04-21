@@ -1138,12 +1138,7 @@ impl MessageClient {
             messages.len()
         );
         for msg in &messages {
-            println!(
-                "[{:?}] from={} subject={}",
-                msg.msg_type,
-                msg.sender_name.as_deref().unwrap_or("?"),
-                msg.subject.as_deref().unwrap_or("(no subject)")
-            );
+            log::info!("msg: {:#?}", msg);
         }
     }
 
@@ -1161,10 +1156,7 @@ impl MessageClient {
     pub fn register_notification(&mut self, mns_channel: u8) -> bool {
         let type_str = b"x-bt/MAP-NotificationRegistration\0";
 
-        let app_params = [
-            0x0E, 0x01, 0x01, // NotificationStatus = ON
-            0x0F, 0x01, 0x00, // MASInstanceID = 0
-        ];
+        let app_params = [0x0E, 0x01, 0x01, 0x0F, 0x01, 0x00];
 
         let mut pkt = vec![0x82, 0x00, 0x00]; // PUT | Final
 
@@ -1230,12 +1222,12 @@ impl MnsServer {
             service_uuid: Some(bluetooth_rust::BluetoothUuid::ObexMns.as_str().to_string()),
             channel: Some(channel),
             psm: None,
-            authenticate: Some(true),
-            authorize: Some(true),
+            authenticate: Some(false),
+            authorize: Some(false),
             auto_connect: Some(true),
             sdp_record: None,
-            sdp_version: None,
-            sdp_features: None,
+            sdp_version: Some(0x0100),
+            sdp_features: Some(0x001f),
         };
         if let Some(adapter) = adapter.supports_async() {
             let profile = adapter
@@ -1251,24 +1243,23 @@ impl MnsServer {
     pub async fn run(mut self) {
         log::info!("MNS server started, waiting for phone to connect...");
         use bluetooth_rust::BluetoothRfcommProfileAsyncTrait;
-        loop {
-            match self.profile.connectable().await {
-                Ok(connectable) => {
-                    log::info!("Running mns now");
-                    use bluetooth_rust::BluetoothRfcommConnectableAsyncTrait;
-                    match connectable.accept().await {
-                        Ok(mut stream) => {
-                            log::info!("MNS: phone connected");
-                            tokio::spawn(async move {
-                                Self::handle_client(&mut stream).await;
-                            });
-                        }
-                        Err(e) => log::error!("MNS accept error: {}", e),
+        match self.profile.connectable().await {
+            Ok(connectable) => {
+                log::info!("Running mns now");
+                match bluetooth_rust::BluetoothRfcommConnectableAsyncTrait::accept(connectable)
+                    .await
+                {
+                    Ok(mut stream) => {
+                        log::info!("MNS: phone connected");
+                        tokio::spawn(async move {
+                            Self::handle_client(&mut stream).await;
+                        });
                     }
+                    Err(e) => log::error!("MNS accept error: {}", e),
                 }
-                Err(e) => {
-                    log::error!("Error running connectable: {}", e);
-                }
+            }
+            Err(e) => {
+                log::error!("Error running connectable: {}", e);
             }
         }
     }
@@ -1288,6 +1279,7 @@ impl MnsServer {
         // Send OBEX CONNECT reply
         let reply = Self::build_connect_reply();
         stream.write_all(&reply).await.ok();
+        stream.flush().await;
 
         // Handle incoming PUT event reports
         loop {
@@ -1309,15 +1301,18 @@ impl MnsServer {
 
                     // ACK with OK
                     stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
+                    stream.flush().await;
                 }
                 0x81 => {
                     // DISCONNECT
                     stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
+                    stream.flush().await;
                     break;
                 }
                 _ => {
                     log::warn!("MNS unexpected opcode {:#X}", opcode);
                     stream.write_all(&[0xC0, 0x00, 0x03]).await.ok();
+                    stream.flush().await;
                 }
             }
         }
@@ -1341,7 +1336,7 @@ impl MnsServer {
 
     fn build_connect_reply() -> Vec<u8> {
         let who: [u8; 16] = [
-            0xBB, 0x58, 0x2B, 0x40, 0x42, 0x0C, 0x11, 0xDB, 0xB0, 0xDE, 0x08, 0x00, 0x20, 0x0C,
+            0xBB, 0x58, 0x2B, 0x41, 0x42, 0x0C, 0x11, 0xDB, 0xB0, 0xDE, 0x08, 0x00, 0x20, 0x0C,
             0x9A, 0x66,
         ];
         let mut reply = vec![
@@ -1392,13 +1387,14 @@ async fn main() -> Result<(), String> {
         .init()
         .expect("Failed to init log");
     let mut ba = BluetoothAdapterBuilder::new();
-    let (s, r) = tokio::sync::mpsc::channel(10);
+    let (s, r) = tokio::sync::mpsc::channel(17);
     ba.with_sender(s);
     let adapter = ba.async_build().await.map_err(|e| e.to_string())?;
-    let mns = MnsServer::new(&adapter, 12)
+    let mns = MnsServer::new(&adapter, 17)
         .await
         .expect("Failed to build mns server");
     tokio::spawn(async move { mns.run().await });
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     let mut macs = Vec::new();
     if let Some(a) = adapter.supports_async() {
         if let Some(devs) = a.get_paired_devices() {
@@ -1440,17 +1436,19 @@ async fn main() -> Result<(), String> {
         log::info!("Building a map message client");
         let mut client = MessageClient::new(s);
         log::info!("Register for notifications");
-        let not = client.register_notification(12);
-        log::info!("Registered for notifications: {}", not);
+        let not = client.register_notification(17);
+        log::info!("Registered for notifications : {}", not);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         client.set_root();
         client.setpath("telecom");
         client.setpath("msg");
         client.setpath("inbox");
         //client.get_folder_listing();
-        client.get_messages();
+        //client.get_messages();
+        log::info!("Sleeping");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
     }
-    log::info!("Sleeping");
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
+    Ok(())
 }
