@@ -848,40 +848,119 @@ pub fn extract_body(data: &[u8]) -> String {
 struct MessageClient {
     socket: BluetoothSocket,
     message_handle: u32,
+    session_ok: bool,
 }
 
 impl MessageClient {
     pub fn new(mut socket: BluetoothSocket) -> Self {
         log::info!("Socket is connected? {:?}", socket.is_connected());
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Use a tokio-aware sleep so the async runtime (including the MNS
+        // acceptor task) keeps making progress while we wait for the RFCOMM
+        // connection to settle before sending the OBEX CONNECT.
+        // Because we now process each device immediately after connecting
+        // there is no multi-second idle window during which the phone could
+        // queue unsolicited bytes, so no explicit drain is needed.
+        // Wait for the RFCOMM connection to fully settle, including Bluetooth
+        // security negotiation (authentication / encryption).  The kernel
+        // completes the L2CAP + RFCOMM handshake before connect() returns, but
+        // the security layer runs asynchronously on some stacks and can take
+        // several hundred ms.  Writing too soon produces ENOTCONN.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(tokio::time::sleep(std::time::Duration::from_secs(1)))
+        });
+        log::info!("Settle wait done, sending OBEX CONNECT");
         // this is the value for mas obex target
+        // MAP MAS OBEX target UUID: BB582B40-420C-11DB-B0DE-0800200C9A66
         let mas_obex_uuid = [
             0xBB, 0x58, 0x2B, 0x40, 0x42, 0x0C, 0x11, 0xDB, 0xB0, 0xDE, 0x08, 0x00, 0x20, 0x0C,
             0x9A, 0x66,
         ];
 
-        let packet = ObexConnect::new(0x8000).target(&mas_obex_uuid).build();
+        // MAP 1.2+ requires MapSupportedFeatures (tag 0x27, 4 bytes) in the
+        // OBEX CONNECT Application Parameters. Without it many phones reply
+        // 0xC6 (Not Acceptable) and refuse subsequent operations.
+        // Bits 0-4: Notification Registration, Notification, Browsing,
+        //           Uploading, Delete features (= MAP 1.2 baseline).
+        let map_supported_features: [u8; 6] = [
+            0x27, 0x04, // tag=MapSupportedFeatures, length=4
+            0x00, 0x00, 0x00, 0x1F, // features bitmap
+        ];
+        let packet = ObexConnect::new(0x8000)
+            .target(&mas_obex_uuid)
+            .byte_seq(0x4C, &map_supported_features) // APPLICATION PARAMETERS
+            .build();
         let a = socket.write_all(&packet);
         let b = socket.flush();
-        log::info!("Sent data: {:?} {:?} {:x?}", a, b, packet);
+        log::info!("Sent OBEX CONNECT: {:?} {:?} {:x?}", a, b, packet);
+
+        // If the write itself failed the socket is dead — skip the read so we
+        // don't block for several seconds waiting for data that will never come.
+        if a.is_err() {
+            log::error!(
+                "OBEX CONNECT write failed ({:?}) — socket is dead, giving up on this device",
+                a
+            );
+            return Self {
+                socket,
+                message_handle: 0,
+                session_ok: false,
+            };
+        }
+
         let mut buf = [0u8; 1024];
         let mut message_handle = 0;
+        let mut session_ok = false;
         if let Ok(a) = socket.read(&mut buf) {
             if a > 0 {
-                log::info!("READ DATA {:?} BYTES {:x?}", a, &buf[0..a]);
+                log::info!("OBEX CONNECT response ({} bytes): {:x?}", a, &buf[0..a]);
                 let resp = ObexConnectResponse::parse(&buf[0..a]);
-                log::info!("Response is {:x?}", resp);
+                log::info!("Parsed response: {:x?}", resp);
                 if let Ok(r) = resp {
+                    if r.is_success() {
+                        log::info!("OBEX CONNECT accepted (0xA0 OK)");
+                        session_ok = true;
+                    } else {
+                        log::warn!(
+                            "OBEX CONNECT non-success code {:#04X} — proceeding if ConnectionId present",
+                            r.response_code
+                        );
+                    }
                     if let Some(i) = r.connection_id() {
+                        log::info!("Got ConnectionId = {}", i);
                         message_handle = i;
+                        // Treat any response that provides a ConnectionId as a
+                        // usable session — some phones reply with a non-0xA0 code
+                        // (e.g. 0xC6) but still assign a valid connection ID.
+                        session_ok = true;
+                    } else {
+                        log::error!(
+                            "No ConnectionId in OBEX CONNECT response — session not usable"
+                        );
                     }
                 }
             }
+        } else {
+            log::error!("Failed to read OBEX CONNECT response — socket is dead");
         }
+        // Give the phone's MAP session a moment to finish initialising after
+        // the OBEX CONNECT before we send any further operations.  Some phones
+        // (especially ones that do internal setup asynchronously) return 0xC0
+        // Bad Request if we send the notification registration too quickly.
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current()
+                .block_on(tokio::time::sleep(std::time::Duration::from_millis(500)))
+        });
         Self {
             socket,
             message_handle,
+            session_ok,
         }
+    }
+
+    /// Returns true if the OBEX session was successfully established.
+    pub fn has_session(&self) -> bool {
+        self.session_ok
     }
 
     /// Read exactly one complete OBEX packet
@@ -1153,21 +1232,47 @@ impl MessageClient {
         pkt
     }
 
-    pub fn register_notification(&mut self, mns_channel: u8) -> bool {
-        let type_str = b"x-bt/MAP-NotificationRegistration\0";
-
-        let app_params = [0x0E, 0x01, 0x01, 0x0F, 0x01, 0x00];
-
+    fn build_put_final(connection_id: u32) -> Vec<u8> {
         let mut pkt = vec![0x82, 0x00, 0x00]; // PUT | Final
 
         pkt.push(0xCB);
+        pkt.extend_from_slice(&connection_id.to_be_bytes());
+
+        // empty end-of-body
+        pkt.push(0x49);
+        pkt.extend_from_slice(&[0x00, 0x03]);
+
+        let total = pkt.len() as u16;
+        pkt[1] = (total >> 8) as u8;
+        pkt[2] = (total & 0xFF) as u8;
+
+        pkt
+    }
+
+    pub fn register_notification(&mut self, _mns_channel: u8) -> bool {
+        // The OBEX spec requires a NUL-terminated string for the TYPE header.
+        // Android's ObexHelper reads (length - 3) bytes and then strips the
+        // trailing NUL before storing the Java String, so the comparison with
+        // TYPE_SET_NOTIFICATION_REGISTRATION succeeds.
+        let type_str = b"x-bt/MAP-NotificationRegistration\0";
+
+        // Only NotificationStatus (tag 0x0E) is required; MASInstanceID
+        // (0x0F) is not needed and some Android versions reject it.
+        let app_params = [0x0E, 0x01, 0x01]; // NotificationStatus = ON
+
+        let mut pkt = vec![0x02, 0x00, 0x00]; // PUT
+
+        // ConnectionId header
+        pkt.push(0xCB);
         pkt.extend_from_slice(&self.message_handle.to_be_bytes());
 
+        // Type header (0x42)
         let type_len = (3 + type_str.len()) as u16;
         pkt.push(0x42);
         pkt.extend_from_slice(&type_len.to_be_bytes());
         pkt.extend_from_slice(type_str);
 
+        // Application Parameters header (0x4C)
         let app_len = (3 + app_params.len()) as u16;
         pkt.push(0x4C);
         pkt.extend_from_slice(&app_len.to_be_bytes());
@@ -1182,12 +1287,26 @@ impl MessageClient {
         self.socket.flush().ok();
 
         let data = self.read_obex_packet();
+
         if let Some(data) = data {
-            log::info!("NotificationRegistration response: {:#X?}", data);
-            (data[0] & 0x7F) == 0x20
-        } else {
-            false
+            if data[0] == 0x90 {
+                let final_put = vec![
+                    0x82, 0x00, 0x07, 0x49, 0x00, 0x04, 0x30, // required filler byte
+                ];
+                log::info!("Final put: {:x?}", final_put);
+                self.socket.write_all(&final_put).ok();
+                self.socket.flush().ok();
+
+                let final_resp = self.read_obex_packet();
+                if let Some(resp) = final_resp {
+                    log::info!("final notification response: {:x?}", resp);
+                    return (resp[0] & 0x7F) == 0x20;
+                }
+            }
+
+            return (data[0] & 0x7F) == 0x20;
         }
+        false
     }
 }
 
@@ -1214,8 +1333,47 @@ impl MnsServer {
         adapter: &bluetooth_rust::BluetoothAdapter,
         channel: u16,
     ) -> Result<Self, String> {
-        // Register an RFCOMM profile for MNS
-        // Check your crate's API for how to create a server profile
+        // Build a proper MAP MNS SDP record so the phone can discover the MNS
+        // service via SDP and know which RFCOMM channel to connect back to.
+        // The ProtocolDescriptorList MUST include OBEX (0x0008); without it
+        // Android does not recognise the service as an OBEX/MAP endpoint and
+        // will not attempt to connect.
+        let sdp_xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" ?>
+<record>
+  <attribute id="0x0001">
+    <sequence>
+      <uuid value="0x1133"/>
+    </sequence>
+  </attribute>
+  <attribute id="0x0004">
+    <sequence>
+      <sequence>
+        <uuid value="0x0100"/>
+      </sequence>
+      <sequence>
+        <uuid value="0x0003"/>
+        <uint8 value="{:#04X}"/>
+      </sequence>
+      <sequence>
+        <uuid value="0x0008"/>
+      </sequence>
+    </sequence>
+  </attribute>
+  <attribute id="0x0009">
+    <sequence>
+      <sequence>
+        <uuid value="0x1134"/>
+        <uint16 value="0x0101"/>
+      </sequence>
+    </sequence>
+  </attribute>
+  <attribute id="0x0100">
+    <text value="MAP MNS"/>
+  </attribute>
+</record>"#,
+            channel
+        );
         let psettings = bluetooth_rust::BluetoothRfcommProfileSettings {
             uuid: bluetooth_rust::BluetoothUuid::ObexMns.as_str().to_string(),
             name: Some("Obex Message Notification Service".to_string()),
@@ -1229,6 +1387,7 @@ impl MnsServer {
             sdp_version: Some(0x0100),
             sdp_features: Some(0x001f),
         };
+        log::info!("The profile is {:#?}", psettings);
         if let Some(adapter) = adapter.supports_async() {
             let profile = adapter
                 .register_rfcomm_profile(psettings)
@@ -1241,36 +1400,43 @@ impl MnsServer {
     }
 
     pub async fn run(mut self) {
-        log::info!("MNS server started, waiting for phone to connect...");
         use bluetooth_rust::BluetoothRfcommProfileAsyncTrait;
-        match self.profile.connectable().await {
-            Ok(connectable) => {
-                log::info!("Running mns now");
-                match bluetooth_rust::BluetoothRfcommConnectableAsyncTrait::accept(connectable)
-                    .await
-                {
-                    Ok(mut stream) => {
-                        log::info!("MNS: phone connected");
-                        tokio::spawn(async move {
-                            Self::handle_client(&mut stream).await;
-                        });
+
+        loop {
+            log::info!("MNS server waiting for phone to connect...");
+
+            match self.profile.connectable().await {
+                Ok(connectable) => {
+                    log::info!("MNS: incoming connection request, accepting...");
+
+                    match bluetooth_rust::BluetoothRfcommConnectableAsyncTrait::accept(connectable)
+                        .await
+                    {
+                        Ok(stream) => {
+                            log::info!("MNS: phone connected");
+
+                            tokio::spawn(async move {
+                                Self::handle_client(stream).await;
+                            });
+                        }
+                        Err(e) => {
+                            log::error!("MNS accept error: {}", e);
+                        }
                     }
-                    Err(e) => log::error!("MNS accept error: {}", e),
                 }
-            }
-            Err(e) => {
-                log::error!("Error running connectable: {}", e);
+                Err(e) => {
+                    log::error!("MNS connectable error (stopping): {}", e);
+                    break;
+                }
             }
         }
     }
 
-    async fn handle_client(
-        stream: &mut (impl tokio::io::AsyncReadExt + tokio::io::AsyncWriteExt + Unpin),
-    ) {
+    async fn handle_client(mut stream: bluetooth_rust::BluetoothStream) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
         // Read OBEX CONNECT from phone
-        let data = match Self::read_packet(stream).await {
+        let data = match Self::read_packet(&mut stream).await {
             Some(d) => d,
             None => return,
         };
@@ -1283,7 +1449,7 @@ impl MnsServer {
 
         // Handle incoming PUT event reports
         loop {
-            let data = match Self::read_packet(stream).await {
+            let data = match Self::read_packet(&mut stream).await {
                 Some(d) => d,
                 None => {
                     log::info!("MNS: phone disconnected");
@@ -1318,7 +1484,7 @@ impl MnsServer {
         }
     }
 
-    async fn read_packet(stream: &mut (impl tokio::io::AsyncReadExt + Unpin)) -> Option<Vec<u8>> {
+    async fn read_packet(stream: &mut bluetooth_rust::BluetoothStream) -> Option<Vec<u8>> {
         use tokio::io::AsyncReadExt;
         let mut header = [0u8; 3];
         stream.read_exact(&mut header).await.ok()?;
@@ -1380,7 +1546,7 @@ impl MnsServer {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() -> Result<(), String> {
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Info)
@@ -1395,35 +1561,60 @@ async fn main() -> Result<(), String> {
         .expect("Failed to build mns server");
     tokio::spawn(async move { mns.run().await });
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    let mut macs = Vec::new();
+    // Process each MAP device *immediately* after connecting — the old
+    // collect-all-then-process approach introduced a multi-second gap during
+    // which the phone could fill the RFCOMM receive buffer with unsolicited
+    // data. That stale data was being mis-read as the OBEX CONNECT response,
+    // producing a spurious 0xC6 (Not Acceptable) and making every subsequent
+    // OBEX operation fail.
     if let Some(a) = adapter.supports_async() {
         if let Some(devs) = a.get_paired_devices() {
             for mut dev in devs {
                 match dev.get_uuids() {
                     Ok(uuids) => {
-                        if uuids.contains(&bluetooth_rust::BluetoothUuid::ObexMas) {
-                            let channel = if let Ok(a) =
-                                dev.run_sdp(bluetooth_rust::BluetoothUuid::ObexMas)
-                            {
-                                if let Some(channel) = a.rfcomm_channel() {
-                                    channel
-                                } else {
-                                    1
-                                }
+                        if !uuids.contains(&bluetooth_rust::BluetoothUuid::ObexMas) {
+                            continue;
+                        }
+                        let channel =
+                            if let Ok(sdp) = dev.run_sdp(bluetooth_rust::BluetoothUuid::ObexMas) {
+                                sdp.rfcomm_channel().unwrap_or(1)
                             } else {
                                 1
                             };
-                            for _ in 0..1 {
-                                match try_map_connect(&mut dev, channel) {
-                                    Ok(s) => {
-                                        log::info!("Got a bluetoothsocket");
-                                        macs.push(s);
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        log::error!("Error trying to connect map: {}", e);
-                                    }
+                        match try_map_connect(&mut dev, channel) {
+                            Ok(s) => {
+                                log::info!("MAP socket on ch {} — processing immediately", channel);
+                                let mut client = MessageClient::new(s);
+                                if !client.has_session() {
+                                    log::warn!("OBEX session not established, skipping device");
+                                    continue;
                                 }
+                                let not = client.register_notification(17);
+                                tokio::task::yield_now().await;
+                                log::info!("Registered for notifications : {}", not);
+                                if !not {
+                                    // Keep going even on failure: some phones return 0xC0 but
+                                    // still process the registration internally and connect to
+                                    // the MNS server.  We log the failure but do not skip, so
+                                    // we can observe whether MNS gets a connection anyway.
+                                    log::warn!(
+                                        "Notification registration returned failure — \
+                                         proceeding anyway to see if MNS still connects"
+                                    );
+                                }
+                                //client.set_root();
+                                //client.setpath("telecom");
+                                //client.setpath("msg");
+                                //client.setpath("inbox");
+                                log::info!("Waiting for MNS callback...");
+                                loop {
+                                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                }
+                                //client.get_folder_listing();
+                                //client.get_messages();
+                            }
+                            Err(e) => {
+                                log::error!("Error trying to connect map: {}", e);
                             }
                         }
                     }
@@ -1432,23 +1623,8 @@ async fn main() -> Result<(), String> {
             }
         }
     }
-    for s in macs {
-        log::info!("Building a map message client");
-        let mut client = MessageClient::new(s);
-        log::info!("Register for notifications");
-        let not = client.register_notification(17);
-        log::info!("Registered for notifications : {}", not);
+    log::info!("All devices processed, waiting for MNS connections...");
+    loop {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        client.set_root();
-        client.setpath("telecom");
-        client.setpath("msg");
-        client.setpath("inbox");
-        //client.get_folder_listing();
-        //client.get_messages();
-        log::info!("Sleeping");
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        }
     }
-    Ok(())
 }

@@ -370,7 +370,11 @@ impl TryFrom<super::BluetoothRfcommProfileSettings> for bluer::rfcomm::Profile {
             uuid: bluer::Uuid::parse_str(&value.uuid).map_err(|e| e.to_string())?,
             name: value.name,
             service,
-            role: None,
+            role: if value.channel.is_some() {
+                Some(bluer::rfcomm::Role::Server)
+            } else {
+                None
+            },
             channel: value.channel,
             psm: value.psm,
             require_authentication: value.authenticate,

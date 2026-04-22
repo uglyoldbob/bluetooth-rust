@@ -75,7 +75,7 @@ pub enum BluetoothResponse {
 }
 
 /// Settings for an rfcomm profile
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BluetoothRfcommProfileSettings {
     /// The uuid for the profile
     pub uuid: String,
