@@ -1383,7 +1383,7 @@ impl MnsServer {
             authenticate: Some(false),
             authorize: Some(false),
             auto_connect: Some(true),
-            sdp_record: None,
+            sdp_record: Some(sdp_xml),
             sdp_version: Some(0x0100),
             sdp_features: Some(0x001f),
         };
@@ -1433,21 +1433,33 @@ impl MnsServer {
     }
 
     async fn handle_client(mut stream: bluetooth_rust::BluetoothStream) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::io::AsyncWriteExt;
 
-        // Read OBEX CONNECT from phone
+        // ---- 1. Expect OBEX CONNECT ----
         let data = match Self::read_packet(&mut stream).await {
             Some(d) => d,
             None => return,
         };
-        log::info!("MNS CONNECT received: {:02x?}", data);
 
-        // Send OBEX CONNECT reply
+        log::info!("MNS received packet: {:02x?}", data);
+
+        // Validate CONNECT opcode
+        if data.first() != Some(&0x80) {
+            log::warn!("MNS: expected CONNECT, got {:02X?}", data.first());
+            return;
+        }
+
+        // ---- 2. Reply to CONNECT ----
         let reply = Self::build_connect_reply();
-        stream.write_all(&reply).await.ok();
-        stream.flush().await;
+        if let Err(e) = stream.write_all(&reply).await {
+            log::warn!("MNS failed to send CONNECT reply: {e}");
+            return;
+        }
+        let _ = stream.flush().await;
 
-        // Handle incoming PUT event reports
+        log::info!("MNS: OBEX session established");
+
+        // ---- 3. Main session loop ----
         loop {
             let data = match Self::read_packet(&mut stream).await {
                 Some(d) => d,
@@ -1457,31 +1469,41 @@ impl MnsServer {
                 }
             };
 
-            let opcode = data[0];
-            match opcode {
-                0x02 | 0x82 => {
-                    // PUT or PUT|Final — event report
-                    let xml = extract_body(&data);
-                    log::info!("MNS event:\n{}", xml);
-                    Self::parse_event(&xml);
+            let opcode = data.get(0).copied().unwrap_or(0);
 
-                    // ACK with OK
-                    stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
-                    stream.flush().await;
-                }
+            match opcode {
                 0x81 => {
                     // DISCONNECT
-                    stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
-                    stream.flush().await;
+                    log::info!("MNS: DISCONNECT received");
+                    let _ = stream.write_all(&[0xA0, 0x00, 0x03]).await;
+                    let _ = stream.flush().await;
                     break;
                 }
+
+                0x02 | 0x82 => {
+                    log::info!("MNS event received");
+
+                    let body = extract_body(&data);
+
+                    log::info!("MAP EVENT:\n{}", body);
+
+                    Self::parse_event(&body);
+
+                    // ACK success
+                    stream.write_all(&[0xA0, 0x00, 0x03]).await.ok();
+                }
+
                 _ => {
-                    log::warn!("MNS unexpected opcode {:#X}", opcode);
-                    stream.write_all(&[0xC0, 0x00, 0x03]).await.ok();
-                    stream.flush().await;
+                    log::warn!("MNS: unknown opcode {:#X}", opcode);
+
+                    // OBEX protocol-safe "Bad Request"
+                    let _ = stream.write_all(&[0xC0, 0x00, 0x03]).await;
+                    let _ = stream.flush().await;
                 }
             }
         }
+
+        log::info!("MNS: session ended");
     }
 
     async fn read_packet(stream: &mut bluetooth_rust::BluetoothStream) -> Option<Vec<u8>> {
