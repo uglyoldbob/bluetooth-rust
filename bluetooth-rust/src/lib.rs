@@ -534,8 +534,8 @@ impl BluetoothStream {
 #[async_trait::async_trait]
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothRfcommConnectableAsyncTrait {
-    /// Accept a connection from a bluetooth peer
-    async fn accept(self) -> Result<BluetoothStream, String>;
+    /// Accept a connection from a bluetooth peer, returns the stream, bluetooth address, and port
+    async fn accept(self) -> Result<(BluetoothStream, [u8; 6], u8), String>;
 }
 
 /// A bluetooth profile for rfcomm channels
@@ -556,7 +556,8 @@ pub enum BluetoothRfcommConnectableAsync {
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothRfcommConnectableSyncTrait {
     /// Accept a connection from a bluetooth peer
-    fn accept(self, timeout: std::time::Duration) -> Result<BluetoothStream, String>;
+    fn accept(self, timeout: std::time::Duration)
+    -> Result<(BluetoothStream, [u8; 6], u8), String>;
 }
 
 /// A bluetooth profile for rfcomm channels

@@ -12,10 +12,19 @@ use futures::StreamExt;
 
 #[async_trait::async_trait]
 impl super::BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest {
-    async fn accept(self) -> Result<crate::BluetoothStream, String> {
-        bluer::rfcomm::ConnectRequest::accept(self)
-            .map(|a| crate::BluetoothStream::Bluez(Box::pin(a)))
-            .map_err(|e| e.to_string())
+    async fn accept(self) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
+        let s = bluer::rfcomm::ConnectRequest::accept(self);
+        match s {
+            Ok(s) => {
+                let addr = s.peer_addr().map_err(|e| e.to_string())?;
+                Ok((
+                    crate::BluetoothStream::Bluez(Box::pin(s)),
+                    *addr.addr,
+                    addr.channel,
+                ))
+            }
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 

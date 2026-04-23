@@ -1413,10 +1413,10 @@ impl MnsServer {
                         .await
                     {
                         Ok(stream) => {
-                            log::info!("MNS: phone connected");
+                            log::info!("MNS: phone connected to {:02x?} {}", stream.1, stream.2);
 
                             tokio::spawn(async move {
-                                Self::handle_client(stream).await;
+                                Self::handle_client(stream.0).await;
                             });
                         }
                         Err(e) => {
