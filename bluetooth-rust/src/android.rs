@@ -5,6 +5,9 @@ use jni::sys::_jobject;
 use jni_min_helper::*;
 use winit::platform::android::activity::AndroidApp;
 
+#[cfg(feature = "async")]
+compile_error!("Android does not support async");
+
 /// Maps unexpected JNI errors to `std::io::Error`.
 /// (`From<jni::errors::Error>` cannot be implemented for `std::io::Error`
 /// here because of the orphan rule). Side effect: `jni_last_cleared_ex()`.
@@ -242,7 +245,10 @@ impl super::BluetoothL2capConnectableSyncTrait for BluetoothRfcommConnectable {
 }
 
 impl super::BluetoothRfcommConnectableSyncTrait for BluetoothRfcommConnectable {
-    fn accept(self, timeout: std::time::Duration) -> Result<crate::BluetoothStream, String> {
+    fn accept(
+        self,
+        timeout: std::time::Duration,
+    ) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
         let mut java2 = self.java.lock().unwrap();
         let millis = (timeout.as_millis() as i32).into();
         java2.use_env(|env, _context| {
@@ -261,8 +267,10 @@ impl super::BluetoothRfcommConnectableSyncTrait for BluetoothRfcommConnectable {
                 .map_err(|e| jerr(env, e).to_string())?;
             let s = RfcommStream::new(socket.into(), self.java.clone())?;
             let comm = crate::BluetoothStream::Android(s);
-            Ok(comm)
-        })
+            unimplemented!();
+            Ok::<(crate::BluetoothStream, [i32; 6], i32), String>((comm, [0;6], 42))
+        });
+        Err("not completed".to_string())
     }
 }
 
@@ -296,16 +304,6 @@ pub struct Bluetooth {
 }
 
 impl super::BluetoothAdapterTrait for Bluetooth {
-    fn supports_async(&mut self) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
-        None
-    }
-
-    fn supports_sync(&mut self) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
-        Some(self)
-    }
-}
-
-impl crate::SyncBluetoothAdapterTrait for Bluetooth {
     fn register_l2cap_profile(
         &self,
         _settings: super::BluetoothL2capProfileSettings,

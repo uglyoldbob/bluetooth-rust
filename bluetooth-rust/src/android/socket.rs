@@ -39,13 +39,19 @@ impl std::fmt::Debug for BluetoothSocket {
     }
 }
 
-impl crate::BluetoothSocketTrait for &mut BluetoothSocket {
+#[cfg_attr(feature = "async", async_trait::async_trait)]
+impl crate::BluetoothSocketTrait for BluetoothSocket {
     fn is_connected(&self) -> Result<bool, std::io::Error> {
         let mut java2 = self.java.lock().unwrap();
         java2.use_env(|env, _context| self.is_connected2(env))
     }
 
-    fn connect(&mut self) -> Result<(), std::io::Error> {
+    #[cfg(feature = "async")]
+    async fn async_connect(&mut self) -> Result<(), std::io::Error> {
+        Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+
+    fn sync_connect(&mut self) -> Result<(), std::io::Error> {
         use crate::BluetoothSocketTrait;
         if self.is_connected()? {
             return Ok(());

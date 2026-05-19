@@ -60,12 +60,8 @@ impl tokio::io::AsyncRead for BluetoothConnection {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         match self.get_mut() {
-            Self::Rfcomm(s) => {
-                tokio::io::AsyncRead::poll_read(std::pin::Pin::new(s), cx, buf)
-            }
-            Self::L2cap(s) => {
-                tokio::io::AsyncRead::poll_read(std::pin::Pin::new(s), cx, buf)
-            }
+            Self::Rfcomm(s) => tokio::io::AsyncRead::poll_read(std::pin::Pin::new(s), cx, buf),
+            Self::L2cap(s) => tokio::io::AsyncRead::poll_read(std::pin::Pin::new(s), cx, buf),
         }
     }
 }
@@ -220,7 +216,10 @@ impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
     }
 
     fn sync_connect(&mut self) -> Result<(), std::io::Error> {
-        Err(std::io::Error::new(std::io::ErrorKind::Other, "sync not supported"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "sync not supported",
+        ))
     }
 
     async fn async_connect(&mut self) -> Result<(), std::io::Error> {
@@ -243,15 +242,16 @@ impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
                 .connect(addr)
                 .await
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
-            log::info!("STREAM {:?} to {:?}", stream.as_ref().local_addr(), stream.peer_addr());
+            log::info!(
+                "STREAM {:?} to {:?}",
+                stream.as_ref().local_addr(),
+                stream.peer_addr()
+            );
             self.connection = Some(BluetoothConnection::Rfcomm(stream));
             log::info!("Got an rfcomm stream");
         } else if let Some(psm) = self.l2cap_psm {
-            let addr = bluer::l2cap::SocketAddr::new(
-                self.device_addr,
-                bluer::AddressType::BrEdr,
-                psm,
-            );
+            let addr =
+                bluer::l2cap::SocketAddr::new(self.device_addr, bluer::AddressType::BrEdr, psm);
             let socket = bluer::l2cap::Socket::<bluer::l2cap::Stream>::new_stream()
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
             if self.is_secure {
@@ -299,10 +299,11 @@ impl LinuxBluetoothDevice {
 #[async_trait::async_trait]
 impl super::BluetoothDeviceAsyncTrait for LinuxBluetoothDevice {
     async fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
-        let uuids =
-            self.device.uuids().await.map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-            })?;
+        let uuids = self
+            .device
+            .uuids()
+            .await
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
         Ok(uuids
             .unwrap_or_default()
             .into_iter()
@@ -323,7 +324,7 @@ impl super::BluetoothDeviceAsyncTrait for LinuxBluetoothDevice {
             .await
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
     }
-        
+
     async fn get_pair_state(&self) -> Result<crate::PairingStatus, std::io::Error> {
         let device = self.device.clone();
         let paired = device

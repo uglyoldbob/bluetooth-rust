@@ -3,7 +3,12 @@
 #![warn(unused_extern_crates)]
 
 //! This library is intended to eventually be a cross-platform bluetooth handling platform
-//! Android portions adapted from <https://github.com/wuwbobo2021/android-bluetooth-serial-rs>
+
+#[cfg(not(any(feature = "sync", feature = "async")))]
+compile_error!("Must enable either the `sync` or `async` feature");
+
+#[cfg(all(feature = "sync", feature = "async"))]
+compile_error!("Cannot enable both `sync` and `async` features simultaneously");
 
 #[cfg(target_os = "android")]
 use std::sync::Arc;
@@ -29,6 +34,12 @@ pub use bluetooth_uuid::BluetoothUuid;
 
 mod sdp;
 
+#[cfg(target_os = "linux")]
+use sdp::ServiceRecord;
+
+#[cfg(target_os = "android")]
+type ServiceRecord = ();
+
 /// Commands issued to the library
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub enum BluetoothCommand {
@@ -40,8 +51,10 @@ pub enum BluetoothCommand {
 
 /// Messages that can be sent specifically to the app user hosting the bluetooth controls
 pub enum MessageToBluetoothHost {
+    #[cfg(feature = "async")]
     /// The passkey used for pairing devices
     DisplayPasskey(u32, tokio::sync::mpsc::Sender<ResponseToPasskey>),
+    #[cfg(feature = "async")]
     /// The passkey to confirm for pairing
     ConfirmPasskey(u32, tokio::sync::mpsc::Sender<ResponseToPasskey>),
     /// Cancal the passkey display
@@ -154,60 +167,58 @@ pub enum BluetoothAdapterAddress {
     Byte([u8; 6]),
 }
 
-/// Common async functionality for the bluetooth adapter
+/// Common functionality for the bluetooth adapter
 #[enum_dispatch::enum_dispatch]
-#[async_trait::async_trait]
-pub trait AsyncBluetoothAdapterTrait {
+#[cfg_attr(feature = "async", async_trait::async_trait)]
+pub trait BluetoothAdapterTrait {
+    #[cfg(feature = "async")]
     /// Attempt to register a new rfcomm profile
     async fn register_rfcomm_profile(
         &self,
         settings: BluetoothRfcommProfileSettings,
     ) -> Result<BluetoothRfcommProfileAsync, String>;
+    #[cfg(feature = "async")]
     /// Attempt to register a new l2cap profile
     async fn register_l2cap_profile(
         &self,
         settings: BluetoothL2capProfileSettings,
     ) -> Result<BluetoothL2capProfileAsync, String>;
+    #[cfg(feature = "async")]
     ///Get a list of paired bluetooth devices
     async fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
+    #[cfg(feature = "async")]
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
     fn start_discovery(&self) -> BluetoothDiscovery;
+    #[cfg(feature = "async")]
     /// Get the mac addresses of all bluetooth adapters for the system
     async fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
+    #[cfg(feature = "async")]
     /// Set the discoverable property
     async fn set_discoverable(&self, d: bool) -> Result<(), ()>;
-}
-
-/// Common sync functionality for the bluetooth adapter
-#[enum_dispatch::enum_dispatch]
-pub trait SyncBluetoothAdapterTrait {
+    #[cfg(feature = "sync")]
     /// Attempt to register a new rfcomm profile
     fn register_rfcomm_profile(
         &self,
         settings: BluetoothRfcommProfileSettings,
     ) -> Result<BluetoothRfcommProfileSync, String>;
+    #[cfg(feature = "sync")]
     /// Attempt to register a new lc2ap profile
     fn register_l2cap_profile(
         &self,
         settings: BluetoothL2capProfileSettings,
     ) -> Result<BluetoothL2capProfileAsync, String>;
+    #[cfg(feature = "sync")]
     ///Get a list of paired bluetooth devices
     fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
+    #[cfg(feature = "sync")]
     /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
     fn start_discovery(&self) -> BluetoothDiscovery;
+    #[cfg(feature = "sync")]
     /// Get the mac addresses of all bluetooth adapters for the system
     fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
+    #[cfg(feature = "sync")]
     /// Set the discoverable property
     fn set_discoverable(&self, d: bool) -> Result<(), ()>;
-}
-
-/// Common functionality for the bluetooth adapter
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothAdapterTrait {
-    /// Returns Some when the async interface is supported
-    fn supports_async(&self) -> Option<&dyn AsyncBluetoothAdapterTrait>;
-    /// Returns Some when the sync interface is supported
-    fn supports_sync(&self) -> Option<&dyn SyncBluetoothAdapterTrait>;
 }
 
 /// The pairing status of a bluetooth device
@@ -278,36 +289,10 @@ fn build_sdp_request(uuid: u16, transaction_id: u16) -> Vec<u8> {
     out
 }
 
-#[async_trait::async_trait]
-#[enum_dispatch::enum_dispatch]
-/// Holds the async functions for a bluetooth device
-pub trait BluetoothDeviceAsyncTrait {
-    /// Get all known uuids for this device
-    async fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error>;
-    /// Retrieve the device name
-    async fn get_name(&self) -> Result<String, std::io::Error>;
-    /// Retrieve the device pairing status
-    async fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
-}
-
-#[enum_dispatch::enum_dispatch]
-/// Holds the sync functions for a bluetooth device
-pub trait BluetoothDeviceSyncTrait {
-    /// Get all known uuids for this device
-    fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error>;
-    /// Retrieve the device name
-    fn get_name(&self) -> Result<String, std::io::Error>;
-    /// Retrieve the device pairing status
-    fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
-}
-
 /// The trait that all bluetooth devices must implement
 #[enum_dispatch::enum_dispatch]
+#[cfg_attr(feature = "async", async_trait::async_trait)]
 pub trait BluetoothDeviceTrait {
-    /// Does the device support async?
-    fn supports_async(&mut self) -> Option<&mut dyn BluetoothDeviceAsyncTrait>;
-    /// Does the device support sync?
-    fn supports_sync(&mut self) -> Option<&mut dyn BluetoothDeviceSyncTrait>;
     /// Retrieve the device address
     fn get_address(&mut self) -> Result<String, std::io::Error>;
     /// Attempt to get an rfcomm socket for the given uuid and security setting
@@ -321,12 +306,37 @@ pub trait BluetoothDeviceTrait {
     fn get_l2cap_socket(&mut self, psm: u16, is_secure: bool) -> Result<BluetoothSocket, String>;
 
     /// Run the service discovery protocol
-    fn run_sdp(&mut self, uuid: BluetoothUuid) -> Result<sdp::ServiceRecord, String> {
+    #[cfg(not(target_os = "android"))]
+    fn run_sdp(&mut self, uuid: BluetoothUuid) -> Result<ServiceRecord, String> {
         if let Ok(a) = self.get_address() {
             return sdp::run_sdp(&a, uuid.get_16_bit_id()).map_err(|e| e.to_string());
         }
         Err("Sdp failed".to_string())
     }
+
+    /// Run the service discovery protocol
+    #[cfg(target_os = "android")]
+    fn run_sdp(&mut self, uuid: BluetoothUuid) -> Result<ServiceRecord, String>;
+
+    #[cfg(feature = "async")]
+    /// Get all known uuids for this device
+    async fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error>;
+    #[cfg(feature = "async")]
+    /// Retrieve the device name
+    async fn get_name(&self) -> Result<String, std::io::Error>;
+    #[cfg(feature = "async")]
+    /// Retrieve the device pairing status
+    async fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
+
+    #[cfg(feature = "sync")]
+    /// Get all known uuids for this device
+    fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error>;
+    #[cfg(feature = "sync")]
+    /// Retrieve the device name
+    fn get_name(&self) -> Result<String, std::io::Error>;
+    #[cfg(feature = "sync")]
+    /// Retrieve the device pairing status
+    fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
 }
 
 /// A bluetooth device
@@ -362,6 +372,7 @@ pub struct BluetoothAdapterBuilder {
     /// The androidapp object
     #[cfg(target_os = "android")]
     app: Option<AndroidApp>,
+    #[cfg(feature = "async")]
     /// The sender to send messages to the bluetooth host
     s: Option<tokio::sync::mpsc::Sender<MessageToBluetoothHost>>,
 }
@@ -378,6 +389,7 @@ impl BluetoothAdapterBuilder {
         Self {
             #[cfg(target_os = "android")]
             app: None,
+            #[cfg(feature = "async")]
             s: None,
         }
     }
@@ -388,6 +400,7 @@ impl BluetoothAdapterBuilder {
         self.app = Some(app);
     }
 
+    #[cfg(feature = "async")]
     /// Add the sender to the builder
     pub fn with_sender(&mut self, s: tokio::sync::mpsc::Sender<MessageToBluetoothHost>) {
         self.s = Some(s);
@@ -446,7 +459,7 @@ macro_rules! pin_match {
             BluetoothStream::Bluez($s) => $body,
 
             #[cfg(target_os = "android")]
-            BluetoothStream::Android($s) => $body,
+            BluetoothStream::Android($s) => unimplemented!(),
 
             #[cfg(target_os = "windows")]
             BluetoothStream::Windows($s) => $body,
@@ -454,6 +467,7 @@ macro_rules! pin_match {
     };
 }
 
+#[cfg(feature = "async")]
 impl tokio::io::AsyncWrite for BluetoothStream {
     fn poll_write(
         self: std::pin::Pin<&mut Self>,
@@ -485,6 +499,7 @@ impl tokio::io::AsyncWrite for BluetoothStream {
     }
 }
 
+#[cfg(feature = "async")]
 impl tokio::io::AsyncRead for BluetoothStream {
     fn poll_read(
         self: std::pin::Pin<&mut Self>,
@@ -497,58 +512,8 @@ impl tokio::io::AsyncRead for BluetoothStream {
     }
 }
 
-impl BluetoothStream {
-    /// Used to check to see if the object supports async read, and then use the functionality
-    pub fn supports_async_read(&mut self) -> Option<&mut dyn tokio::io::AsyncRead> {
-        match self {
-            #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(pin) => Some(pin),
-            #[cfg(target_os = "android")]
-            BluetoothStream::Android(_pin) => None,
-            #[cfg(target_os = "windows")]
-            BluetoothStream::Windows(_pin) => None,
-        }
-    }
-
-    /// Used to check to see if the object supports async write, and then use the functionality
-    pub fn supports_async_write(&mut self) -> Option<&mut dyn tokio::io::AsyncWrite> {
-        match self {
-            #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(pin) => Some(pin),
-            #[cfg(target_os = "android")]
-            BluetoothStream::Android(_pin) => None,
-            #[cfg(target_os = "windows")]
-            BluetoothStream::Windows(_pin) => None,
-        }
-    }
-
-    /// Used to try to use synchronous read functionality
-    pub fn supports_sync_read(&mut self) -> Option<&mut dyn std::io::Read> {
-        match self {
-            #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(_pin) => None,
-            #[cfg(target_os = "android")]
-            BluetoothStream::Android(pin) => Some(pin),
-            #[cfg(target_os = "windows")]
-            BluetoothStream::Windows(pin) => Some(pin),
-        }
-    }
-
-    /// Used to try to use synchronous write functionality
-    pub fn supports_sync_write(&mut self) -> Option<&mut dyn std::io::Write> {
-        match self {
-            #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez(_pin) => None,
-            #[cfg(target_os = "android")]
-            BluetoothStream::Android(pin) => Some(pin),
-            #[cfg(target_os = "windows")]
-            BluetoothStream::Windows(pin) => Some(pin),
-        }
-    }
-}
-
 /// The trait for bluetooth rfcomm objects that can be connected or accepted
-#[async_trait::async_trait]
+#[cfg_attr(feature = "async", async_trait::async_trait)]
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothRfcommConnectableAsyncTrait {
     /// Accept a connection from a bluetooth peer, returns the stream, bluetooth address, and port
@@ -558,9 +523,6 @@ pub trait BluetoothRfcommConnectableAsyncTrait {
 /// A bluetooth profile for rfcomm channels
 #[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableAsyncTrait)]
 pub enum BluetoothRfcommConnectableAsync {
-    /// The android object for the profile
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommConnectable),
     /// The bluez library in linux is responsible for the profile
     #[cfg(target_os = "linux")]
     Bluez(bluer::rfcomm::ConnectRequest),
@@ -690,33 +652,17 @@ impl BluetoothRfcommProfileAsyncTrait for Dummy {
     }
 }
 
-/// A trait combining read and write functionality
-pub trait AsyncReadWrite: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {}
-impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send> AsyncReadWrite for T {}
-
-/// A trait combining read and write functionality
-pub trait SyncReadWrite: std::io::Read + std::io::Write + Send {}
-impl<T: std::io::Read + std::io::Write + Unpin + Send> SyncReadWrite for T {}
-
-
 /// The common functions for all bluetooth rfcomm sockets
-#[async_trait::async_trait]
+#[cfg_attr(feature = "async", async_trait::async_trait)]
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothSocketTrait {
     /// Is the socket connected
     fn is_connected(&self) -> Result<bool, std::io::Error>;
+    #[cfg(feature = "async")]
     /// connect the socket
     async fn async_connect(&mut self) -> Result<(), std::io::Error>;
     /// connect the socket
     fn sync_connect(&mut self) -> Result<(), std::io::Error>;
-    /// Does the socket support async?
-    fn supports_async(&mut self) -> Option<&mut dyn AsyncReadWrite> {
-        None
-    }
-    /// Does the socket support sync?
-    fn supports_sync(&mut self) -> Option<&mut dyn SyncReadWrite> {
-        None
-    }
 }
 
 /// A bluetooth rfcomm socket

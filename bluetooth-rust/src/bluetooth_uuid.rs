@@ -46,6 +46,8 @@ pub enum BluetoothUuid {
     AvrcpRemote,
     /// Network nap protocol for bluetooth networking
     NetworkingNap,
+    /// A custom uuid
+    Custom(String, u16),
     /// An unknown bluetooth uuid
     Unknown(String),
 }
@@ -71,6 +73,7 @@ impl BluetoothUuid {
             BluetoothUuid::HspHs => 0x1108,
             BluetoothUuid::HspAg => 0x1112,
             BluetoothUuid::AndroidAuto => 0x7a00,
+            BluetoothUuid::Custom(a, b) => *b,
             BluetoothUuid::Unknown(s) => u16::from_str_radix(&s[4..8], 16).unwrap(),
         }
     }
@@ -95,6 +98,7 @@ impl BluetoothUuid {
             BluetoothUuid::HspHs => "00001108-0000-1000-8000-00805f9b34fb",
             BluetoothUuid::HspAg => "00001112-0000-1000-8000-00805f9b34fb",
             BluetoothUuid::AndroidAuto => "4de17a00-52cb-11e6-bdf4-0800200c9a66",
+            BluetoothUuid::Custom(a, b) => a,
             BluetoothUuid::Unknown(s) => s,
         }
     }
