@@ -24,10 +24,7 @@ pub struct BluetoothSocket {
     thread_read: Option<JoinHandle<Result<(), std::io::Error>>>, // the returned value is unused
     read_callback: Arc<Mutex<Option<super::ReadCallback>>>,      // None by default
     read_timeout: Duration,                                      // set for the standard Read trait
-
     output_stream: jni::objects::GlobalRef,
-    jmethod_write: jni::objects::JMethodID,
-    jmethod_flush: jni::objects::JMethodID,
     array_write: jni::objects::GlobalRef,
     uuid: String,
     java: Arc<Mutex<Java>>,
@@ -111,14 +108,6 @@ impl BluetoothSocket {
                 .globalize(env)
                 .map_err(|e| jerr(env, e))
         })?;
-        let jmethod_write = java2.use_env(|env, _context| {
-            env.get_method_id("java/io/OutputStream", "write", "([BII)V")
-                .map_err(|e| jerr(env, e))
-        })?;
-        let jmethod_flush = java2.use_env(|env, _context| {
-            env.get_method_id("java/io/OutputStream", "flush", "()V")
-                .map_err(|e| jerr(env, e))
-        })?;
 
         let array_size = Self::ARRAY_SIZE as i32;
         let array_write = java2.use_env(|env, _context| {
@@ -137,8 +126,6 @@ impl BluetoothSocket {
             read_timeout: Duration::from_millis(0),
 
             output_stream,
-            jmethod_write,
-            jmethod_flush,
             array_write,
             uuid: uuid.to_string(),
             java,
@@ -356,10 +343,12 @@ impl std::io::Write for BluetoothSocket {
         use jni::signature::*;
         java.use_env(|env, _context| {
             // Safety: arguments passed to `call_method_unchecked` are correct.
+            let jmethod_write = env.get_method_id("java/io/OutputStream", "write", "([BII)V")
+                    .map_err(|e| jerr(env, e))?;
             unsafe {
                 env.call_method_unchecked(
                     &self.output_stream,
-                    self.jmethod_write,
+                    jmethod_write,
                     ReturnType::Primitive(Primitive::Void),
                     &[
                         jni::sys::jvalue {
@@ -391,10 +380,12 @@ impl std::io::Write for BluetoothSocket {
         let mut java = self.java.lock().unwrap();
         java.use_env(|env, _context| {
             use jni::signature::*;
+            let jmethod_flush = env.get_method_id("java/io/OutputStream", "flush", "()V")
+                    .map_err(|e| jerr(env, e))?;
             unsafe {
                 env.call_method_unchecked(
                     &self.output_stream,
-                    self.jmethod_flush,
+                    jmethod_flush,
                     ReturnType::Primitive(Primitive::Void),
                     &[],
                 )
