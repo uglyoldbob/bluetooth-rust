@@ -10,7 +10,6 @@ use futures::StreamExt;
 // BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest
 // ────────────────────────────────────────────────────────────────────────────
 
-#[async_trait::async_trait]
 impl super::BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest {
     async fn accept(self) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
         let s = bluer::rfcomm::ConnectRequest::accept(self);
@@ -205,12 +204,7 @@ impl tokio::io::AsyncWrite for BluetoothRfcommSocket {
     }
 }
 
-#[async_trait::async_trait]
 impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
-    fn supports_async(&mut self) -> Option<&mut (dyn super::AsyncReadWrite)> {
-        Some(self)
-    }
-
     fn is_connected(&self) -> Result<bool, std::io::Error> {
         Ok(self.connection.is_some())
     }
@@ -296,8 +290,7 @@ impl LinuxBluetoothDevice {
     }
 }
 
-#[async_trait::async_trait]
-impl super::BluetoothDeviceAsyncTrait for LinuxBluetoothDevice {
+impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     async fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         let uuids = self
             .device
@@ -337,16 +330,6 @@ impl super::BluetoothDeviceAsyncTrait for LinuxBluetoothDevice {
             crate::PairingStatus::NotPaired
         })
     }
-}
-
-impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
-    fn supports_async(&mut self) -> Option<&mut dyn super::BluetoothDeviceAsyncTrait> {
-        Some(self)
-    }
-
-    fn supports_sync(&mut self) -> Option<&mut dyn super::BluetoothDeviceSyncTrait> {
-        None
-    }
 
     fn get_address(&mut self) -> Result<String, std::io::Error> {
         Ok(self.device.address().to_string())
@@ -363,6 +346,7 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     fn get_l2cap_socket(
         &mut self,
         psm: u16,
+        uuid: crate::BluetoothUuid,
         is_secure: bool,
     ) -> Result<crate::BluetoothSocket, String> {
         let addr = self.device.address();
@@ -381,6 +365,7 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     fn get_rfcomm_socket(
         &mut self,
         channel: u8,
+        uuid: crate::BluetoothUuid,
         is_secure: bool,
     ) -> Result<crate::BluetoothSocket, String> {
         let addr = self.device.address();
@@ -487,17 +472,6 @@ pub struct BluetoothHandler {
 }
 
 impl super::BluetoothAdapterTrait for BluetoothHandler {
-    fn supports_async(&self) -> Option<&dyn super::AsyncBluetoothAdapterTrait> {
-        Some(self)
-    }
-
-    fn supports_sync(&self) -> Option<&dyn super::SyncBluetoothAdapterTrait> {
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
     async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,
@@ -509,6 +483,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
             .map_err(|e| e.to_string())
     }
 
+    #[cfg(feature = "async")]
     /// Register an L2CAP profile with BlueZ.
     ///
     /// BlueZ exposes a single `RegisterProfile` D-Bus method (ProfileManager1)
@@ -525,10 +500,12 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
             .map_err(|e| e.to_string())
     }
 
+    #[cfg(feature = "async")]
     fn start_discovery(&self) -> crate::BluetoothDiscovery {
         BluetoothDiscovery::new().into()
     }
 
+    #[cfg(feature = "async")]
     /// Return all paired devices across every adapter.
     async fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
         let mut list = Vec::new();
@@ -556,6 +533,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
         Some(list)
     }
 
+    #[cfg(feature = "async")]
     async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
         let mut a = Vec::new();
         for adapter in &self.adapters {
@@ -566,12 +544,13 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
         a
     }
 
+    #[cfg(feature = "async")]
     async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
         for adapter in &self.adapters {
             adapter.set_discoverable(d).await.map_err(|_| ())?;
         }
         Ok(())
-    }
+    }    
 }
 
 impl BluetoothHandler {

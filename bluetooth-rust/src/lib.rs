@@ -169,7 +169,6 @@ pub enum BluetoothAdapterAddress {
 
 /// Common functionality for the bluetooth adapter
 #[enum_dispatch::enum_dispatch]
-#[cfg_attr(feature = "async", async_trait::async_trait)]
 pub trait BluetoothAdapterTrait {
     #[cfg(feature = "async")]
     /// Attempt to register a new rfcomm profile
@@ -291,7 +290,6 @@ fn build_sdp_request(uuid: u16, transaction_id: u16) -> Vec<u8> {
 
 /// The trait that all bluetooth devices must implement
 #[enum_dispatch::enum_dispatch]
-#[cfg_attr(feature = "async", async_trait::async_trait)]
 pub trait BluetoothDeviceTrait {
     /// Retrieve the device address
     fn get_address(&mut self) -> Result<String, std::io::Error>;
@@ -299,11 +297,12 @@ pub trait BluetoothDeviceTrait {
     fn get_rfcomm_socket(
         &mut self,
         channel: u8,
+        uuid: BluetoothUuid,
         is_secure: bool,
     ) -> Result<BluetoothSocket, String>;
 
     /// Attempt to get an l2cap socket for the given uuid and security setting
-    fn get_l2cap_socket(&mut self, psm: u16, is_secure: bool) -> Result<BluetoothSocket, String>;
+    fn get_l2cap_socket(&mut self, psm: u16, uuid: BluetoothUuid, is_secure: bool) -> Result<BluetoothSocket, String>;
 
     /// Run the service discovery protocol
     #[cfg(not(target_os = "android"))]
@@ -513,7 +512,6 @@ impl tokio::io::AsyncRead for BluetoothStream {
 }
 
 /// The trait for bluetooth rfcomm objects that can be connected or accepted
-#[cfg_attr(feature = "async", async_trait::async_trait)]
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothRfcommConnectableAsyncTrait {
     /// Accept a connection from a bluetooth peer, returns the stream, bluetooth address, and port
@@ -653,7 +651,6 @@ impl BluetoothRfcommProfileAsyncTrait for Dummy {
 }
 
 /// The common functions for all bluetooth rfcomm sockets
-#[cfg_attr(feature = "async", async_trait::async_trait)]
 #[enum_dispatch::enum_dispatch]
 pub trait BluetoothSocketTrait {
     /// Is the socket connected
@@ -677,4 +674,43 @@ pub enum BluetoothSocket {
     /// Windows bluetooth socket
     #[cfg(target_os = "windows")]
     Windows(windows::BluetoothRfcommSocket),
+}
+
+#[cfg(feature = "sync")]
+impl std::io::Read for BluetoothSocket {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(target_os = "android")]
+            Self::Android(a) => a.read(buf),
+            #[cfg(target_os = "linux")]
+            Self::Bluez(a) => a.read(buf),
+            #[cfg(target_os = "windows")]
+            Self::Windows(a) => a.read(buf),
+        }
+    }
+}
+
+#[cfg(feature = "sync")]
+impl std::io::Write for BluetoothSocket {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(target_os = "android")]
+            Self::Android(a) => a.write(buf),
+            #[cfg(target_os = "linux")]
+            Self::Bluez(a) => a.write(buf),
+            #[cfg(target_os = "windows")]
+            Self::Windows(a) => a.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            #[cfg(target_os = "android")]
+            Self::Android(a) => a.flush(),
+            #[cfg(target_os = "linux")]
+            Self::Bluez(a) => a.flush(),
+            #[cfg(target_os = "windows")]
+            Self::Windows(a) => a.flush(),
+        }
+    }
 }
