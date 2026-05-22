@@ -174,10 +174,9 @@ impl std::io::Write for RfcommStream {
                 .call_method(
                     socket,
                     jni::jni_str!("write"),
-                    jni::jni_sig!("([B)V"), ///TODO unsure of this signature now
+                    jni::jni_sig!("([B)V"),
                     &[(&ba).into()],
-                )?
-                .l()?;
+                )?;
             Ok(buf.len())
         })
         .map_err(jerr)
@@ -188,8 +187,7 @@ impl std::io::Write for RfcommStream {
         java.attach_current_thread(|env| {
             let socket = self.socket.get().unwrap().as_obj();
             let _ = env
-                .call_method(socket, jni::jni_str!("flush"), jni::jni_sig!("()V"), &[])?
-                .l()?;
+                .call_method(socket, jni::jni_str!("flush"), jni::jni_sig!("()V"), &[])?;
             Ok(())
         })
         .map_err(jerr)

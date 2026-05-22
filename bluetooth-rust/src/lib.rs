@@ -376,6 +376,7 @@ pub type BluetoothL2capProfile = android::BluetoothRfcommProfile;
 #[cfg(target_os = "android")]
 pub type BluetoothSocket = android::BluetoothSocket;
 
+
 /// A bluetooth rfcomm socket
 #[cfg(target_os = "linux")]
 pub type BluetoothSocket = linux::BluetoothRfcommSocket;

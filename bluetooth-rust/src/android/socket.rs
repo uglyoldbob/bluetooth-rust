@@ -6,6 +6,7 @@ use jni::objects::JObject;
 use jni_min_helper::*;
 use std::{
     collections::VecDeque,
+    marker::PhantomData,
     sync::{Arc, Mutex},
     thread::JoinHandle,
     time::{Duration, SystemTime},
@@ -28,6 +29,7 @@ pub struct BluetoothSocket {
     output_stream: jni::objects::Global<JObject<'static>>,
     array_write: jni::objects::Global<JObject<'static>>,
     uuid: String,
+    _marker: PhantomData<*const ()>,
 }
 
 impl std::fmt::Debug for BluetoothSocket {
@@ -136,11 +138,12 @@ impl BluetoothSocket {
                 buf_read: Arc::new(Mutex::new(VecDeque::new())),
                 thread_read: None,
                 read_callback: Arc::new(Mutex::new(None)),
-                read_timeout: Duration::from_millis(0),
+                read_timeout: Duration::from_millis(1000),
 
                 output_stream,
                 array_write,
                 uuid: uuid.to_string(),
+                _marker: PhantomData,
             })
         })
         .map_err(jerr)
@@ -415,7 +418,7 @@ impl std::io::Write for BluetoothSocket {
                     jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
                     &[],
                 )?;
-                env.new_global_ref(a.l()?)
+                Ok(())
             }
         })
         .map(|_| ())
