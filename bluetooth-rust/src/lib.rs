@@ -307,9 +307,9 @@ impl BluetoothAdapterBuilder {
     pub async fn build(self) -> Result<BluetoothAdapter, String> {
         #[cfg(target_os = "linux")]
         {
-            return Ok(BluetoothAdapter::Bluez(
+            return Ok(
                 linux::BluetoothHandler::new(self.s.unwrap()).await?,
-            ));
+            );
         }
         #[cfg(target_os = "windows")]
         {
@@ -322,7 +322,7 @@ impl BluetoothAdapterBuilder {
 
 /// An active stream for bluetooth communications
 #[cfg(target_os = "linux")]
-pub type BluetoothStream = std::pin::Pin<Box<bluer::rfcomm::Stream>>;
+pub type BluetoothStream = linux::BluetoothStream;
 
 /// An active stream for bluetooth communications
 #[cfg(target_os = "android")]
@@ -338,7 +338,7 @@ pub type BluetoothRfcommConnectable = android::BluetoothRfcommConnectable;
 
 /// A type that allows rfcomm connections
 #[cfg(target_os = "linux")]
-pub type BluetoothRfcommConnectable = bluer::rfcomm::ConnectRequest;
+pub type BluetoothRfcommConnectable = linux::BluetoothRfCommConnectable;
 
 /// A type that allows rfcomm connections
 #[cfg(target_os = "windows")]
@@ -350,11 +350,11 @@ pub type BluetoothL2capConnectable = android::BluetoothRfcommConnectable;
 
 #[cfg(all(target_os = "linux", feature = "async"))]
 /// A bluetooth profile for l2cap channels
-pub type BluetoothL2capConnectable = bluer::rfcomm::ConnectRequest;
+pub type BluetoothL2capConnectable = linux::BluetoothL2capConnectable;
 
 #[cfg(all(target_os = "linux", feature = "async"))]
 /// A bluetooth profile for rfcomm channels
-pub type BluetoothRfcommProfile = bluer::rfcomm::ProfileHandle;
+pub type BluetoothRfcommProfile = linux::BluetoothRfcommProfile;
 
 #[cfg(all(target_os = "windows", feature = "async"))]
 /// A bluetooth profile for rfcomm channels
@@ -366,7 +366,7 @@ pub type BluetoothRfcommProfile = android::BluetoothRfcommProfile;
 
 #[cfg(all(target_os = "linux", feature = "async"))]
 /// A bluetooth profile for l2cap channels
-pub type BluetoothL2capProfile = bluer::rfcomm::ProfileHandle;
+pub type BluetoothL2capProfile = linux::BluetoothL2capProfile;
 
 #[cfg(all(target_os = "android", feature = "sync"))]
 /// A bluetooth profile for l2cap channels

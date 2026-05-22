@@ -6,18 +6,62 @@ use bluer::AdapterEvent;
 use futures::FutureExt;
 use futures::StreamExt;
 
+pub struct BluetoothRfCommConnectable(bluer::rfcomm::ConnectRequest);
+
+pub struct BluetoothL2capConnectable(bluer::rfcomm::ConnectRequest);
+
+pub struct BluetoothRfcommProfile(bluer::rfcomm::ProfileHandle);
+
+pub struct BluetoothL2capProfile(bluer::rfcomm::ProfileHandle);
+
+pub struct BluetoothStream(std::pin::Pin<Box<bluer::rfcomm::Stream>>);
+
+impl tokio::io::AsyncRead for BluetoothStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.0.as_mut().poll_read(cx, buf)
+    }
+}
+
+impl tokio::io::AsyncWrite for BluetoothStream {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        self.0.as_mut().poll_write(cx, buf)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.0.as_mut().poll_flush(cx)
+    }
+
+    fn poll_shutdown(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.0.as_mut().poll_shutdown(cx)
+    }
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest
 // ────────────────────────────────────────────────────────────────────────────
 
-impl super::BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectRequest {
-    async fn accept(self) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
-        let s = bluer::rfcomm::ConnectRequest::accept(self);
+impl BluetoothRfCommConnectable {
+    pub async fn accept(self) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
+        let s = bluer::rfcomm::ConnectRequest::accept(self.0);
         match s {
             Ok(s) => {
                 let addr = s.peer_addr().map_err(|e| e.to_string())?;
                 Ok((
-                    crate::BluetoothStream::Bluez(Box::pin(s)),
+                    BluetoothStream(Box::pin(s)),
                     *addr.addr,
                     addr.channel,
                 ))
@@ -31,11 +75,12 @@ impl super::BluetoothRfcommConnectableAsyncTrait for bluer::rfcomm::ConnectReque
 // BluetoothRfcommProfileAsyncTrait for bluer::rfcomm::ProfileHandle
 // ────────────────────────────────────────────────────────────────────────────
 
-impl super::BluetoothRfcommProfileAsyncTrait for bluer::rfcomm::ProfileHandle {
-    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectableAsync, String> {
-        self.next()
+impl BluetoothRfcommProfile {
+    /// get an rfcomm connectable struct
+    pub async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
+        self.0.next()
             .await
-            .map(|a| crate::BluetoothRfcommConnectableAsync::Bluez(a))
+            .map(|a| BluetoothRfCommConnectable(a))
             .ok_or_else(|| "Failed to get bluetooth connection".to_string())
     }
 }
@@ -204,7 +249,7 @@ impl tokio::io::AsyncWrite for BluetoothRfcommSocket {
     }
 }
 
-impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
+impl BluetoothRfcommSocket {
     fn is_connected(&self) -> Result<bool, std::io::Error> {
         Ok(self.connection.is_some())
     }
@@ -290,7 +335,7 @@ impl LinuxBluetoothDevice {
     }
 }
 
-impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
+impl LinuxBluetoothDevice {
     async fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         let uuids = self
             .device
@@ -351,7 +396,7 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     ) -> Result<crate::BluetoothSocket, String> {
         let addr = self.device.address();
         let socket = BluetoothRfcommSocket::new_l2cap(addr, psm, is_secure);
-        Ok(crate::BluetoothSocket::Bluez(socket))
+        Ok(socket)
     }
 
     /// Return a socket suitable for an outgoing RFCOMM connection to the given
@@ -370,7 +415,7 @@ impl super::BluetoothDeviceTrait for LinuxBluetoothDevice {
     ) -> Result<crate::BluetoothSocket, String> {
         let addr = self.device.address();
         let socket = BluetoothRfcommSocket::new_rfcomm(addr, channel, is_secure);
-        Ok(crate::BluetoothSocket::Bluez(socket))
+        Ok(socket)
     }
 }
 
@@ -387,8 +432,6 @@ impl BluetoothDiscovery {
         Self {}
     }
 }
-
-impl super::BluetoothDiscoveryTrait for BluetoothDiscovery {}
 
 impl Drop for BluetoothDiscovery {
     fn drop(&mut self) {}
@@ -471,15 +514,16 @@ pub struct BluetoothHandler {
     _blue_agent_handle: bluer::agent::AgentHandle,
 }
 
-impl super::BluetoothAdapterTrait for BluetoothHandler {
-    async fn register_rfcomm_profile(
+impl BluetoothHandler {
+    /// register an rfcomm profile
+    pub async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,
-    ) -> Result<crate::BluetoothRfcommProfileAsync, String> {
+    ) -> Result<crate::BluetoothRfcommProfile, String> {
         self.session
             .register_profile(settings.try_into()?)
             .await
-            .map(|a| super::BluetoothRfcommProfileAsync::Bluez(a.into()))
+            .map(|a| BluetoothRfcommProfile(a))
             .map_err(|e| e.to_string())
     }
 
@@ -492,11 +536,11 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
     async fn register_l2cap_profile(
         &self,
         settings: super::BluetoothL2capProfileSettings,
-    ) -> Result<crate::BluetoothL2capProfileAsync, String> {
+    ) -> Result<crate::BluetoothL2capProfile, String> {
         self.session
             .register_profile(settings.try_into()?)
             .await
-            .map(|a| super::BluetoothL2capProfileAsync::Bluez(a.into()))
+            .map(|a| BluetoothL2capProfile(a.into()))
             .map_err(|e| e.to_string())
     }
 
@@ -524,9 +568,9 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
             };
             if let Ok(devices) = result {
                 for dev in devices {
-                    list.push(crate::BluetoothDevice::Bluez(LinuxBluetoothDevice::new(
+                    list.push(LinuxBluetoothDevice::new(
                         dev,
-                    )));
+                    ));
                 }
             }
         }
@@ -550,21 +594,10 @@ impl super::BluetoothAdapterTrait for BluetoothHandler {
             adapter.set_discoverable(d).await.map_err(|_| ())?;
         }
         Ok(())
-    }    
+    }
 }
 
 impl BluetoothHandler {
-    /// Retrieve the bluetooth addresses for all bluetooth adapters present
-    pub async fn addresses(&self) -> Vec<bluer::Address> {
-        let mut addrs = Vec::new();
-        for a in &self.adapters {
-            if let Ok(addr) = a.address().await {
-                addrs.push(addr);
-            }
-        }
-        addrs
-    }
-
     /// Construct a new self
     pub async fn new(
         s: tokio::sync::mpsc::Sender<super::MessageToBluetoothHost>,
@@ -602,21 +635,6 @@ impl BluetoothHandler {
             adapter.set_powered(false).await.unwrap();
             adapter.set_pairable(false).await.unwrap();
         }
-    }
-
-    /// Enable or disable discoverable mode on all bluetooth adapters
-    pub async fn set_discoverable(&mut self, d: bool) {
-        for adapter in &self.adapters {
-            adapter.set_discoverable(d).await.unwrap();
-        }
-    }
-
-    /// Register an RFCOMM profile with the bluetooth session
-    pub async fn register_rfcomm_profile(
-        &mut self,
-        profile: bluer::rfcomm::Profile,
-    ) -> Result<bluer::rfcomm::ProfileHandle, bluer::Error> {
-        self.session.register_profile(profile).await
     }
 
     /// Build a bluetooth agent for the handler

@@ -75,9 +75,7 @@ impl BluetoothSocket {
                 let arc_buf_read = self.buf_read.clone();
                 let arc_callback = self.read_callback.clone();
                 self.thread_read.replace(std::thread::spawn(move || {
-                    let mut java = todo!();
                     BluetoothSocket::read_loop(
-                        &mut java,
                         socket,
                         input_stream,
                         arc_buf_read,
@@ -161,7 +159,6 @@ impl BluetoothSocket {
     }
 
     fn read_loop(
-        java: &mut jni::JavaVM,
         socket: jni::objects::Global<JObject<'static>>,
         input_stream: jni::objects::Global<JObject<'static>>,
         buf_read: Arc<Mutex<VecDeque<u8>>>,
