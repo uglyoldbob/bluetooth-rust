@@ -1,7 +1,8 @@
 //! bluetooth socket code on android
 
-use super::super::Java;
 use super::jerr;
+use jni::objects::Global;
+use jni::objects::JObject;
 use jni_min_helper::*;
 use std::{
     collections::VecDeque,
@@ -17,17 +18,16 @@ use std::{
 /// Reference:
 /// <https://developer.android.com/develop/connectivity/bluetooth/transfer-data>
 pub struct BluetoothSocket {
-    internal: jni::objects::GlobalRef,
+    internal: jni::objects::Global<JObject<'static>>,
 
-    input_stream: jni::objects::GlobalRef,
+    input_stream: jni::objects::Global<JObject<'static>>,
     buf_read: Arc<Mutex<VecDeque<u8>>>,
     thread_read: Option<JoinHandle<Result<(), std::io::Error>>>, // the returned value is unused
     read_callback: Arc<Mutex<Option<super::ReadCallback>>>,      // None by default
     read_timeout: Duration,                                      // set for the standard Read trait
-    output_stream: jni::objects::GlobalRef,
-    array_write: jni::objects::GlobalRef,
+    output_stream: jni::objects::Global<JObject<'static>>,
+    array_write: jni::objects::Global<JObject<'static>>,
     uuid: String,
-    java: Arc<Mutex<Java>>,
 }
 
 impl std::fmt::Debug for BluetoothSocket {
@@ -37,51 +37,63 @@ impl std::fmt::Debug for BluetoothSocket {
 }
 
 #[cfg_attr(feature = "async", async_trait::async_trait)]
-impl crate::BluetoothSocketTrait for BluetoothSocket {
+impl BluetoothSocket {
     fn is_connected(&self) -> Result<bool, std::io::Error> {
-        let mut java2 = self.java.lock().unwrap();
-        java2.use_env(|env, _context| self.is_connected2(env))
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| self.is_connected2(env))
+            .map_err(|e| jerr(e))
     }
 
+    /// connect to the socket
     #[cfg(feature = "async")]
-    async fn async_connect(&mut self) -> Result<(), std::io::Error> {
+    pub async fn async_connect(&mut self) -> Result<(), std::io::Error> {
         Err(std::io::Error::from(std::io::ErrorKind::NotFound))
     }
 
-    fn sync_connect(&mut self) -> Result<(), std::io::Error> {
-        use crate::BluetoothSocketTrait;
+    /// connect to the socket
+    pub fn sync_connect(&mut self) -> Result<(), std::io::Error> {
         if self.is_connected()? {
             return Ok(());
         }
-        let mut java = self.java.lock().unwrap();
-        log::warn!("Connecting to {}", self.uuid);
-        let app = java.get_app();
-        let connected = java.use_env(|env, _context| {
-            env.call_method(&self.internal, "connect", "()V", &[])
-                .map_err(|e| jerr(env, e))
-                .inspect_err(|e| log::error!("Connect error is {:?}", e))?;
-            self.is_connected2(env)
-        })?;
-        log::warn!("Connected status is {}", connected);
-        if connected {
-            let socket = self.internal.clone();
-            let input_stream = self.input_stream.clone();
-            let arc_buf_read = self.buf_read.clone();
-            let arc_callback = self.read_callback.clone();
-            self.thread_read.replace(std::thread::spawn(move || {
-                let mut java = Java::make(app);
-                BluetoothSocket::read_loop(
-                    &mut java,
-                    socket,
-                    input_stream,
-                    arc_buf_read,
-                    arc_callback,
+        let java = jni_min_helper::jni_get_vm();
+        let a = java.attach_current_thread(|env| {
+            log::warn!("Connecting to {}", self.uuid);
+            let connected = {
+                env.call_method(
+                    &self.internal,
+                    jni::jni_str!("connect"),
+                    jni::jni_sig!("()V"),
+                    &[],
                 )
-            }));
-            log::warn!("Done connecting");
-            Ok(())
-        } else {
-            Err(std::io::Error::from(std::io::ErrorKind::NotConnected))
+                .inspect_err(|e| log::error!("Connect error is {:?}", e))?;
+                self.is_connected2(env)
+            }?;
+            log::warn!("Connected status is {}", connected);
+            if connected {
+                let socket = env.new_global_ref(self.internal.as_obj()).unwrap();
+                let input_stream = env.new_global_ref(self.input_stream.as_obj()).unwrap();
+                let arc_buf_read = self.buf_read.clone();
+                let arc_callback = self.read_callback.clone();
+                self.thread_read.replace(std::thread::spawn(move || {
+                    let mut java = todo!();
+                    BluetoothSocket::read_loop(
+                        &mut java,
+                        socket,
+                        input_stream,
+                        arc_buf_read,
+                        arc_callback,
+                    )
+                }));
+                log::warn!("Done connecting");
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        });
+        match a {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(std::io::Error::new(std::io::ErrorKind::NotConnected, "")),
+            Err(e) => Err(jerr(e)),
         }
     }
 }
@@ -89,71 +101,87 @@ impl crate::BluetoothSocketTrait for BluetoothSocket {
 impl BluetoothSocket {
     const ARRAY_SIZE: usize = 32 * 1024;
 
+    /// build a new socket
     pub fn build(
-        obj: jni::objects::GlobalRef,
-        java: Arc<Mutex<Java>>,
+        obj: jni::objects::Global<JObject<'static>>,
         uuid: &str,
     ) -> Result<Self, std::io::Error> {
-        let mut java2 = java.lock().unwrap();
-        let input_stream = java2.use_env(|env, _context| {
-            // the streams may (or may NOT) be usable after reconnection (check Android SDK source)
-            env.call_method(&obj, "getInputStream", "()Ljava/io/InputStream;", &[])
-                .get_object(env)
-                .globalize(env)
-                .map_err(|e| jerr(env, e))
-        })?;
-        let output_stream = java2.use_env(|env, _context| {
-            env.call_method(&obj, "getOutputStream", "()Ljava/io/OutputStream;", &[])
-                .get_object(env)
-                .globalize(env)
-                .map_err(|e| jerr(env, e))
-        })?;
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            let input_stream = env
+                .call_method(
+                    &obj,
+                    jni::jni_str!("getInputStream"),
+                    jni::jni_sig!("()Ljava/io/InputStream;"),
+                    &[],
+                )?
+                .into_object()?;
+            let input_stream = env.new_global_ref(input_stream)?;
+            let output_stream = env
+                .call_method(
+                    &obj,
+                    jni::jni_str!("getOutputStream"),
+                    jni::jni_sig!("()Ljava/io/OutputStream;"),
+                    &[],
+                )?
+                .into_object()?;
+            let output_stream = env.new_global_ref(output_stream)?;
 
-        let array_size = Self::ARRAY_SIZE as i32;
-        let array_write = java2.use_env(|env, _context| {
-            env.new_byte_array(array_size)
-                .global_ref(env)
-                .map_err(|e| jerr(env, e))
-        })?;
-        drop(java2);
-        Ok(Self {
-            internal: obj,
+            let array_size = Self::ARRAY_SIZE as usize;
+            let temp = env.new_byte_array(array_size)?.into();
+            let array_write =
+                env.new_global_ref::<JObject>(temp)?;
+            Ok(Self {
+                internal: obj,
 
-            input_stream,
-            buf_read: Arc::new(Mutex::new(VecDeque::new())),
-            thread_read: None,
-            read_callback: Arc::new(Mutex::new(None)),
-            read_timeout: Duration::from_millis(0),
+                input_stream,
+                buf_read: Arc::new(Mutex::new(VecDeque::new())),
+                thread_read: None,
+                read_callback: Arc::new(Mutex::new(None)),
+                read_timeout: Duration::from_millis(0),
 
-            output_stream,
-            array_write,
-            uuid: uuid.to_string(),
-            java,
+                output_stream,
+                array_write,
+                uuid: uuid.to_string(),
+            })
         })
+        .map_err(jerr)
     }
 
     /// Gets the connection status of this socket.
     #[inline(always)]
-    fn is_connected2(&self, env: &mut jni::JNIEnv) -> Result<bool, std::io::Error> {
-        env.call_method(&self.internal, "isConnected", "()Z", &[])
-            .get_boolean()
-            .map_err(|e| jerr(env, e))
+    fn is_connected2(&self, env: &mut jni::Env) -> Result<bool, jni::errors::Error> {
+        env.call_method(
+            &self.internal,
+            jni::jni_str!("isConnected"),
+            jni::jni_sig!("()Z"),
+            &[],
+        )?
+        .into_bool()
     }
 
     fn read_loop(
-        java: &mut Java,
-        socket: jni::objects::GlobalRef,
-        input_stream: jni::objects::GlobalRef,
+        java: &mut jni::JavaVM,
+        socket: jni::objects::Global<JObject<'static>>,
+        input_stream: jni::objects::Global<JObject<'static>>,
         buf_read: Arc<Mutex<VecDeque<u8>>>,
         read_callback: Arc<Mutex<Option<super::ReadCallback>>>,
     ) -> Result<(), std::io::Error> {
-        java.use_env(|env, _context| {
-            let jmethod_read = env
-                .get_method_id("java/io/InputStream", "read", "([BII)I")
-                .map_err(|e| jerr(env, e))?;
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            let jmethod_read = env.get_method_id(
+                jni::jni_str!("java/io/InputStream"),
+                jni::jni_str!("read"),
+                jni::jni_sig!("([BII)I"),
+            )?;
             let read_size = env
-                .call_method(&socket, "getMaxReceivePacketSize", "()I", &[])
-                .get_int()
+                .call_method(
+                    &socket,
+                    jni::jni_str!("getMaxReceivePacketSize"),
+                    jni::jni_sig!("()I"),
+                    &[],
+                )?
+                .into_int()
                 .map(|i| {
                     if i > 0 {
                         let sz = i as usize;
@@ -165,23 +193,19 @@ impl BluetoothSocket {
                 .unwrap_or(Self::ARRAY_SIZE);
 
             let mut vec_read = vec![0u8; read_size];
-            let array_read = env
-                .new_byte_array(read_size as i32)
-                .auto_local(env)
-                .map_err(|e| jerr(env, e))?;
-            let array_read: &jni::objects::JByteArray<'_> = array_read.as_ref().into();
+            let array_read = env.new_byte_array(read_size)?;
 
             loop {
-                use jni::signature::*;
+                let array_read2 = env.new_local_ref(&array_read)?;
                 // Safety: arguments passed to `call_method_unchecked` are correct.
                 let read_len = unsafe {
                     env.call_method_unchecked(
                         &input_stream,
                         jmethod_read,
-                        ReturnType::Primitive(Primitive::Int),
+                        jni::signature::ReturnType::Primitive(jni::signature::Primitive::Int),
                         &[
                             jni::sys::jvalue {
-                                l: array_read.as_raw(),
+                                l: array_read2.into_raw(),
                             },
                             jni::sys::jvalue {
                                 i: 0 as jni::sys::jint,
@@ -191,8 +215,9 @@ impl BluetoothSocket {
                             },
                         ],
                     )
-                }
-                .get_int();
+                }?
+                .into_int();
+                let array_read2 = env.new_local_ref(&array_read)?;
                 if let Ok(len) = read_len {
                     use std::io::Write;
                     let len = if len > 0 {
@@ -205,8 +230,7 @@ impl BluetoothSocket {
                     let tmp_read = unsafe {
                         std::slice::from_raw_parts_mut(vec_read.as_mut_ptr() as *mut i8, len)
                     };
-                    env.get_byte_array_region(array_read, 0, tmp_read)
-                        .map_err(|e| jerr(env, e))?;
+                    env.get_byte_array_region(array_read2, 0, tmp_read)?;
                     buf_read
                         .lock()
                         .unwrap()
@@ -214,21 +238,26 @@ impl BluetoothSocket {
                         .unwrap();
                     Self::read_callback(&read_callback, Some(len));
                 } else {
+                    /*TODO NOT SURE HOW TO DO THIS IN jni 0.22.4
                     if let Some(ex) = jni_last_cleared_ex() {
                         let ex_msg = ex.get_throwable_msg(env).unwrap().to_lowercase();
                         if ex_msg.contains("closed") {
                             // Note: will it change in future Android versions?
                             let _ = env
-                                .call_method(&socket, "close", "()V", &[])
-                                .map_err(jni_clear_ex_ignore);
+                                .call_method(&socket, "close", "()V", &[]);
                             Self::read_callback(&read_callback, None);
                             return Ok(());
                         }
                     }
+                    */
                     let is_connected = env
-                        .call_method(&socket, "isConnected", "()Z", &[])
-                        .get_boolean()
-                        .map_err(|e| jerr(env, e))?;
+                        .call_method(
+                            &socket,
+                            jni::jni_str!("isConnected"),
+                            jni::jni_sig!("()Z"),
+                            &[],
+                        )?
+                        .into_bool()?;
                     if !is_connected {
                         Self::read_callback(&read_callback, None);
                         return Ok(());
@@ -236,6 +265,7 @@ impl BluetoothSocket {
                 }
             }
         })
+        .map_err(jerr)
     }
 
     fn read_callback(cb: impl AsRef<Mutex<Option<super::ReadCallback>>>, val: Option<usize>) {
@@ -253,28 +283,30 @@ impl BluetoothSocket {
     /// Closes this socket and releases any system resources associated with it.
     /// If the stream is already closed then invoking this method has no effect.
     pub fn close(&mut self) -> Result<(), std::io::Error> {
-        use crate::BluetoothSocketTrait;
         use std::io::Write;
         if !self.is_connected()? {
             return Ok(());
         }
         let _ = self.flush();
-        let mut java = self.java.lock().unwrap();
-        java.use_env(|env, _context| -> Result<(), std::io::Error> {
-            env.call_method(&self.internal, "close", "()V", &[])
-                .clear_ex()
-                .map_err(|e| jerr(env, e))
-        })?;
-        if let Some(th) = self.thread_read.take() {
-            let _ = th.join();
-        }
-        Ok(())
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            env.call_method(
+                &self.internal,
+                jni::jni_str!("close"),
+                jni::jni_sig!("()V"),
+                &[],
+            )?;
+            if let Some(th) = self.thread_read.take() {
+                let _ = th.join();
+            }
+            Ok(())
+        })
+        .map_err(jerr)
     }
 }
 
 impl std::io::Read for BluetoothSocket {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        use crate::BluetoothSocketTrait;
         if buf.is_empty() {
             return Ok(0);
         }
@@ -313,43 +345,39 @@ impl std::io::Read for BluetoothSocket {
 
 impl std::io::Write for BluetoothSocket {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        use crate::BluetoothSocketTrait;
         if buf.is_empty() {
             return Ok(0);
         }
 
-        let array_write: &jni::objects::JByteArray<'_> = self.array_write.as_obj().into();
-        let mut java = self.java.lock().unwrap();
-        let al = java
-            .use_env(|env, _context| env.get_array_length(array_write).map_err(|e| jerr(env, e)))?
-            as usize;
-        if al < buf.len() {
-            self.array_write = java.use_env(|env, _context| {
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            let ab = env.new_global_ref(self.array_write.as_obj())?;
+            let temp = env.new_local_ref(ab.as_obj())?;
+            let array_write: jni::objects::JByteArray<'_> =
+                env.cast_local::<jni::objects::JByteArray>(temp)?;
+            let al = env.get_array_length(&array_write)? as usize;
+            if al < buf.len() {
                 // replace the prepared reusable Java array with a larger array
-                env.byte_array_from_slice(buf)
-                    .global_ref(env)
-                    .map_err(|e| jerr(env, e))
-            })?;
-        } else {
-            java.use_env(|env, _context| -> std::io::Result<()> {
+                let temp = env.byte_array_from_slice(buf)?.into();
+                self.array_write =
+                    env.new_global_ref::<JObject>(temp)?;
+            } else {
                 // Safety: casts `&[u8]` to `&[i8]` for `set_byte_array_region`.
                 let buf =
                     unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const i8, buf.len()) };
-                env.set_byte_array_region(array_write, 0, buf)
-                    .map_err(|e| jerr(env, e))
-            })?;
-        }
-
-        use jni::signature::*;
-        java.use_env(|env, _context| {
+                env.set_byte_array_region(array_write, 0, buf)?;
+            }
             // Safety: arguments passed to `call_method_unchecked` are correct.
-            let jmethod_write = env.get_method_id("java/io/OutputStream", "write", "([BII)V")
-                    .map_err(|e| jerr(env, e))?;
+            let jmethod_write = env.get_method_id(
+                jni::jni_str!("java/io/OutputStream"),
+                jni::jni_str!("write"),
+                jni::jni_sig!("([BII)V"),
+            )?;
             unsafe {
                 env.call_method_unchecked(
                     &self.output_stream,
                     jmethod_write,
-                    ReturnType::Primitive(Primitive::Void),
+                    jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
                     &[
                         jni::sys::jvalue {
                             l: self.array_write.as_raw(),
@@ -363,36 +391,38 @@ impl std::io::Write for BluetoothSocket {
                     ],
                 )
             }
-            .clear_ex()
-            .map_err(|e| {
-                if !self.is_connected().unwrap_or(false) {
-                    std::io::Error::from(std::io::ErrorKind::NotConnected)
-                } else {
-                    jerr(env, e)
-                }
-            })
             .map(|_| buf.len())
+        })
+        .map_err(|e| {
+            if !self.is_connected().unwrap_or(false) {
+                std::io::Error::from(std::io::ErrorKind::NotConnected)
+            } else {
+                jerr(e)
+            }
         })
     }
 
     #[inline]
     fn flush(&mut self) -> std::io::Result<()> {
-        let mut java = self.java.lock().unwrap();
-        java.use_env(|env, _context| {
-            use jni::signature::*;
-            let jmethod_flush = env.get_method_id("java/io/OutputStream", "flush", "()V")
-                    .map_err(|e| jerr(env, e))?;
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            let jmethod_flush = env.get_method_id(
+                jni::jni_str!("java/io/OutputStream"),
+                jni::jni_str!("flush"),
+                jni::jni_sig!("()V"),
+            )?;
             unsafe {
-                env.call_method_unchecked(
+                let a = env.call_method_unchecked(
                     &self.output_stream,
                     jmethod_flush,
-                    ReturnType::Primitive(Primitive::Void),
+                    jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
                     &[],
-                )
+                )?;
+                env.new_global_ref(a.l()?)
             }
-            .clear_ex()
-            .map_err(|e| jerr(env, e))
         })
+        .map(|_| ())
+        .map_err(jerr)
     }
 }
 

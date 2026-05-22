@@ -5,6 +5,8 @@ use super::android::Java;
 #[cfg(target_os = "android")]
 use super::android::jerr;
 #[cfg(target_os = "android")]
+use jni::objects::JObject;
+#[cfg(target_os = "android")]
 use jni_min_helper::*;
 #[cfg(target_os = "android")]
 use std::sync::{Arc, Mutex};
@@ -140,8 +142,7 @@ impl From<ParcelUuid> for BluetoothUuid {
 
 #[cfg(target_os = "android")]
 pub struct ParcelUuid {
-    internal: jni::objects::GlobalRef,
-    java: Arc<Mutex<Java>>,
+    internal: jni::objects::Global<JObject<'static>>,
 }
 
 #[cfg(target_os = "android")]
@@ -156,24 +157,25 @@ impl std::fmt::Display for ParcelUuid {
 
 #[cfg(target_os = "android")]
 impl ParcelUuid {
-    pub fn new(uuid: jni::objects::GlobalRef, java: Arc<Mutex<Java>>) -> Self {
-        Self {
-            internal: uuid,
-            java,
-        }
+    pub fn new(uuid: jni::objects::Global<JObject<'static>>) -> Self {
+        Self { internal: uuid }
     }
 
     pub fn to_string(&self) -> Result<String, std::io::Error> {
-        let mut java = self.java.lock().unwrap();
-        java.use_env(|env, _context| {
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
             let dev_name = env
-                .call_method(&self.internal, "toString", "()Ljava/lang/String;", &[])
-                .get_object(env)
-                .map_err(|e| jerr(env, e))?;
-            if dev_name.is_null() {
-                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
-            }
-            dev_name.get_string(env).map_err(|e| jerr(env, e))
+                .call_method(
+                    &self.internal,
+                    jni::jni_str!("toString"),
+                    jni::jni_sig!("()Ljava/lang/String;"),
+                    &[],
+                )?
+                .l()?;
+            let temp = env.new_local_ref(&dev_name)?;
+            let jstr = env.cast_local::<jni::objects::JString>(temp)?;
+            Ok(env.get_string(&jstr)?.to_str().to_string())
         })
+        .map_err(jerr)
     }
 }

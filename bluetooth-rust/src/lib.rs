@@ -15,11 +15,9 @@ use std::sync::Arc;
 #[cfg(target_os = "android")]
 use std::sync::Mutex;
 #[cfg(target_os = "android")]
-mod android;
+pub mod android;
 #[cfg(target_os = "android")]
 pub use android::Bluetooth;
-#[cfg(target_os = "android")]
-pub use android::Java;
 #[cfg(target_os = "android")]
 use winit::platform::android::activity::AndroidApp;
 
@@ -141,23 +139,17 @@ pub struct BluetoothL2capProfileSettings {
     pub sdp_features: Option<u16>,
 }
 
-/// The trait that implements managing when bluetooth discovery is enabled
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothDiscoveryTrait {}
+/// Used for discovering bluetooth devices
+#[cfg(target_os = "android")]
+pub type BluetoothDiscovery = android::BluetoothDiscovery;
 
-/// The trait for the object that manages bluetooth discovery
-#[enum_dispatch::enum_dispatch(BluetoothDiscoveryTrait)]
-pub enum BluetoothDiscovery {
-    /// The android version
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothDiscovery),
-    /// Linux bluez library implementation
-    #[cfg(target_os = "linux")]
-    Bluez(linux::BluetoothDiscovery),
-    /// Windows implementation
-    #[cfg(target_os = "windows")]
-    Windows(windows::BluetoothDiscovery),
-}
+/// Used for discovering bluetooth devices
+#[cfg(target_os = "linux")]
+pub type BluetoothDiscovery = linux::BluetoothDiscovery;
+
+/// Used for discovering bluetooth devices
+#[cfg(target_os = "windows")]
+pub type BluetoothDiscovery = windows::BluetoothDiscovery;
 
 /// The address of a bluetooth adapter
 pub enum BluetoothAdapterAddress {
@@ -165,59 +157,6 @@ pub enum BluetoothAdapterAddress {
     String(String),
     /// The address in byte form
     Byte([u8; 6]),
-}
-
-/// Common functionality for the bluetooth adapter
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothAdapterTrait {
-    #[cfg(feature = "async")]
-    /// Attempt to register a new rfcomm profile
-    async fn register_rfcomm_profile(
-        &self,
-        settings: BluetoothRfcommProfileSettings,
-    ) -> Result<BluetoothRfcommProfileAsync, String>;
-    #[cfg(feature = "async")]
-    /// Attempt to register a new l2cap profile
-    async fn register_l2cap_profile(
-        &self,
-        settings: BluetoothL2capProfileSettings,
-    ) -> Result<BluetoothL2capProfileAsync, String>;
-    #[cfg(feature = "async")]
-    ///Get a list of paired bluetooth devices
-    async fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
-    #[cfg(feature = "async")]
-    /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
-    fn start_discovery(&self) -> BluetoothDiscovery;
-    #[cfg(feature = "async")]
-    /// Get the mac addresses of all bluetooth adapters for the system
-    async fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
-    #[cfg(feature = "async")]
-    /// Set the discoverable property
-    async fn set_discoverable(&self, d: bool) -> Result<(), ()>;
-    #[cfg(feature = "sync")]
-    /// Attempt to register a new rfcomm profile
-    fn register_rfcomm_profile(
-        &self,
-        settings: BluetoothRfcommProfileSettings,
-    ) -> Result<BluetoothRfcommProfileSync, String>;
-    #[cfg(feature = "sync")]
-    /// Attempt to register a new lc2ap profile
-    fn register_l2cap_profile(
-        &self,
-        settings: BluetoothL2capProfileSettings,
-    ) -> Result<BluetoothL2capProfileAsync, String>;
-    #[cfg(feature = "sync")]
-    ///Get a list of paired bluetooth devices
-    fn get_paired_devices(&self) -> Option<Vec<BluetoothDevice>>;
-    #[cfg(feature = "sync")]
-    /// Start discovery of bluetooth devices. Run this and drop the result to cancel discovery
-    fn start_discovery(&self) -> BluetoothDiscovery;
-    #[cfg(feature = "sync")]
-    /// Get the mac addresses of all bluetooth adapters for the system
-    fn addresses(&self) -> Vec<BluetoothAdapterAddress>;
-    #[cfg(feature = "sync")]
-    /// Set the discoverable property
-    fn set_discoverable(&self, d: bool) -> Result<(), ()>;
 }
 
 /// The pairing status of a bluetooth device
@@ -288,83 +227,29 @@ fn build_sdp_request(uuid: u16, transaction_id: u16) -> Vec<u8> {
     out
 }
 
-/// The trait that all bluetooth devices must implement
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothDeviceTrait {
-    /// Retrieve the device address
-    fn get_address(&mut self) -> Result<String, std::io::Error>;
-    /// Attempt to get an rfcomm socket for the given uuid and security setting
-    fn get_rfcomm_socket(
-        &mut self,
-        channel: u8,
-        uuid: BluetoothUuid,
-        is_secure: bool,
-    ) -> Result<BluetoothSocket, String>;
-
-    /// Attempt to get an l2cap socket for the given uuid and security setting
-    fn get_l2cap_socket(&mut self, psm: u16, uuid: BluetoothUuid, is_secure: bool) -> Result<BluetoothSocket, String>;
-
-    /// Run the service discovery protocol
-    #[cfg(not(target_os = "android"))]
-    fn run_sdp(&mut self, uuid: BluetoothUuid) -> Result<ServiceRecord, String> {
-        if let Ok(a) = self.get_address() {
-            return sdp::run_sdp(&a, uuid.get_16_bit_id()).map_err(|e| e.to_string());
-        }
-        Err("Sdp failed".to_string())
-    }
-
-    /// Run the service discovery protocol
-    #[cfg(target_os = "android")]
-    fn run_sdp(&mut self, uuid: BluetoothUuid) -> Result<ServiceRecord, String>;
-
-    #[cfg(feature = "async")]
-    /// Get all known uuids for this device
-    async fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error>;
-    #[cfg(feature = "async")]
-    /// Retrieve the device name
-    async fn get_name(&self) -> Result<String, std::io::Error>;
-    #[cfg(feature = "async")]
-    /// Retrieve the device pairing status
-    async fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
-
-    #[cfg(feature = "sync")]
-    /// Get all known uuids for this device
-    fn get_uuids(&mut self) -> Result<Vec<BluetoothUuid>, std::io::Error>;
-    #[cfg(feature = "sync")]
-    /// Retrieve the device name
-    fn get_name(&self) -> Result<String, std::io::Error>;
-    #[cfg(feature = "sync")]
-    /// Retrieve the device pairing status
-    fn get_pair_state(&self) -> Result<PairingStatus, std::io::Error>;
-}
+/// A bluetooth device
+#[cfg(target_os = "android")]
+pub type BluetoothDevice = android::BluetoothDevice;
 
 /// A bluetooth device
-#[enum_dispatch::enum_dispatch(BluetoothDeviceTrait)]
-pub enum BluetoothDevice {
-    /// Bluetooth device on android
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothDevice),
-    /// Bluetooth device on linux using the bluez library
-    #[cfg(target_os = "linux")]
-    Bluez(linux::LinuxBluetoothDevice),
-    /// Bluetooth device on Windows
-    #[cfg(target_os = "windows")]
-    Windows(windows::BluetoothDevice),
-}
+#[cfg(target_os = "linux")]
+pub type BluetoothDevice = linux::LinuxBluetoothDevice;
+
+/// A bluetooth device
+#[cfg(target_os = "windows")]
+pub type BluetoothDevice = windows::LinuxBluetoothDevice;
 
 /// Represents a bluetooth adapter that communicates to bluetooth devices
-#[enum_dispatch::enum_dispatch(BluetoothAdapterTrait)]
-pub enum BluetoothAdapter {
-    /// The bluetooth adapter for android systems
-    #[cfg(target_os = "android")]
-    Android(android::Bluetooth),
-    /// On linux, bluetooth adapter using the bluez library
-    #[cfg(target_os = "linux")]
-    Bluez(linux::BluetoothHandler),
-    /// On Windows, bluetooth adapter using the windows crate
-    #[cfg(target_os = "windows")]
-    Windows(windows::BluetoothHandler),
-}
+#[cfg(target_os = "android")]
+pub type BluetoothAdapter = android::Bluetooth;
+
+/// Represents a bluetooth adapter that communicates to bluetooth devices
+#[cfg(target_os = "linux")]
+pub type BluetoothAdapter = linux::BluetoothHandler;
+
+/// Represents a bluetooth adapter that communicates to bluetooth devices
+#[cfg(target_os = "windows")]
+pub type BluetoothAdapter = windows::BluetoothHandler;
 
 /// A builder for `BluetoothAdapter`
 pub struct BluetoothAdapterBuilder {
@@ -406,22 +291,20 @@ impl BluetoothAdapterBuilder {
     }
 
     /// Do the build
-    pub fn build(self) -> Result<BluetoothAdapter, String> {
-        #[cfg(target_os = "android")]
-        {
-            return Ok(BluetoothAdapter::Android(android::Bluetooth::new(
-                self.app.unwrap(),
-            )));
-        }
-        Err("No synchronous builders available".to_string())
+    #[cfg(all(target_os = "android", feature = "sync"))]
+    pub fn build<'a>(self) -> Result<BluetoothAdapter, String> {
+        return Ok(android::Bluetooth::new(self.app.unwrap()));
     }
 
     /// Do the build
-    pub async fn async_build(self) -> Result<BluetoothAdapter, String> {
-        #[cfg(target_os = "android")]
-        {
-            return self.build();
-        }
+    #[cfg(all(target_os = "android", feature = "async"))]
+    pub async fn build(self) -> Result<BluetoothAdapter, String> {
+        return self.build();
+    }
+
+    #[cfg(all(not(target_os = "android"), feature = "async"))]
+    /// Do the build
+    pub async fn build(self) -> Result<BluetoothAdapter, String> {
         #[cfg(target_os = "linux")]
         {
             return Ok(BluetoothAdapter::Bluez(
@@ -434,283 +317,69 @@ impl BluetoothAdapterBuilder {
                 windows::BluetoothHandler::new(self.s.unwrap()).await?,
             ));
         }
-        Err("No async builders available".to_string())
     }
 }
 
 /// An active stream for bluetooth communications
-pub enum BluetoothStream {
-    /// On linux, a stream using the bluez library
-    #[cfg(target_os = "linux")]
-    Bluez(std::pin::Pin<Box<bluer::rfcomm::Stream>>),
-    /// Android code for a bluetooth stream
-    #[cfg(target_os = "android")]
-    Android(android::RfcommStream),
-    /// Windows RFCOMM stream
-    #[cfg(target_os = "windows")]
-    Windows(windows::WindowsRfcommStream),
-}
+#[cfg(target_os = "linux")]
+pub type BluetoothStream = std::pin::Pin<Box<bluer::rfcomm::Stream>>;
 
-macro_rules! pin_match {
-    ($this:expr, $s:ident => $body:expr) => {
-        match $this.get_mut() {
-            #[cfg(target_os = "linux")]
-            BluetoothStream::Bluez($s) => $body,
+/// An active stream for bluetooth communications
+#[cfg(target_os = "android")]
+pub type BluetoothStream = android::RfcommStream;
 
-            #[cfg(target_os = "android")]
-            BluetoothStream::Android($s) => unimplemented!(),
+/// An active stream for bluetooth communications
+#[cfg(target_os = "windows")]
+pub type BluetoothStream = windows::WindowsRfcommStream;
 
-            #[cfg(target_os = "windows")]
-            BluetoothStream::Windows($s) => $body,
-        }
-    };
-}
+/// A type that allows rfcomm connections
+#[cfg(target_os = "android")]
+pub type BluetoothRfcommConnectable = android::BluetoothRfcommConnectable;
 
-#[cfg(feature = "async")]
-impl tokio::io::AsyncWrite for BluetoothStream {
-    fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<std::io::Result<usize>> {
-        pin_match!(self, s => {
-            // SAFETY: we delegate to inner stream directly
-            tokio::io::AsyncWrite::poll_write(std::pin::Pin::new(s), cx, buf)
-        })
-    }
+/// A type that allows rfcomm connections
+#[cfg(target_os = "linux")]
+pub type BluetoothRfcommConnectable = bluer::rfcomm::ConnectRequest;
 
-    fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        pin_match!(self, s => {
-            tokio::io::AsyncWrite::poll_flush(std::pin::Pin::new(s), cx)
-        })
-    }
+/// A type that allows rfcomm connections
+#[cfg(target_os = "windows")]
+pub type BluetoothRfcommConnectable = windows::BluetoothRfcommConnectable;
 
-    fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        pin_match!(self, s => {
-            tokio::io::AsyncWrite::poll_shutdown(std::pin::Pin::new(s), cx)
-        })
-    }
-}
+#[cfg(all(target_os = "android", feature = "async"))]
+/// A bluetooth profile for l2cap channels
+pub type BluetoothL2capConnectable = android::BluetoothRfcommConnectable;
 
-#[cfg(feature = "async")]
-impl tokio::io::AsyncRead for BluetoothStream {
-    fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        pin_match!(self, s => {
-            tokio::io::AsyncRead::poll_read(std::pin::Pin::new(s), cx, buf)
-        })
-    }
-}
+#[cfg(all(target_os = "linux", feature = "async"))]
+/// A bluetooth profile for l2cap channels
+pub type BluetoothL2capConnectable = bluer::rfcomm::ConnectRequest;
 
-/// The trait for bluetooth rfcomm objects that can be connected or accepted
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommConnectableAsyncTrait {
-    /// Accept a connection from a bluetooth peer, returns the stream, bluetooth address, and port
-    async fn accept(self) -> Result<(BluetoothStream, [u8; 6], u8), String>;
-}
-
+#[cfg(all(target_os = "linux", feature = "async"))]
 /// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableAsyncTrait)]
-pub enum BluetoothRfcommConnectableAsync {
-    /// The bluez library in linux is responsible for the profile
-    #[cfg(target_os = "linux")]
-    Bluez(bluer::rfcomm::ConnectRequest),
-    /// Windows RFCOMM connectable
-    #[cfg(target_os = "windows")]
-    Windows(windows::BluetoothRfcommConnectable),
-}
+pub type BluetoothRfcommProfile = bluer::rfcomm::ProfileHandle;
 
-/// The trait for bluetooth rfcomm objects that can be connected or accepted
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommConnectableSyncTrait {
-    /// Accept a connection from a bluetooth peer
-    fn accept(self, timeout: std::time::Duration)
-    -> Result<(BluetoothStream, [u8; 6], u8), String>;
-}
-
+#[cfg(all(target_os = "windows", feature = "async"))]
 /// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothRfcommConnectableSyncTrait)]
-pub enum BluetoothRfcommConnectableSync {
-    /// The android object for the profile
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommConnectable),
-}
+pub type BluetoothRfcommProfile = windows::BluetoothRfcommProfile;
 
-/// The trait for bluetooth rfcomm objects that can be connected or accepted
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothL2capConnectableAsyncTrait {
-    /// Accept a connection from a bluetooth peer
-    async fn accept(self) -> Result<BluetoothStream, String>;
-}
-
+#[cfg(all(target_os = "android", feature = "sync"))]
 /// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothL2capConnectableTrait)]
-pub enum BluetoothL2capConnectableAsync {
-    /// The android object for the profile
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommConnectable),
-    /// The bluez library in linux is responsible for the profile
-    #[cfg(target_os = "linux")]
-    Bluez(bluer::rfcomm::ConnectRequest),
-}
+pub type BluetoothRfcommProfile = android::BluetoothRfcommProfile;
 
-/// The trait for bluetooth rfcomm objects that can be connected or accepted
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothL2capConnectableSyncTrait {
-    /// Accept a connection from a bluetooth peer
-    fn accept(self, timeout: std::time::Duration) -> Result<BluetoothStream, String>;
-}
+#[cfg(all(target_os = "linux", feature = "async"))]
+/// A bluetooth profile for l2cap channels
+pub type BluetoothL2capProfile = bluer::rfcomm::ProfileHandle;
 
-/// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothL2capConnectableSyncTrait)]
-pub enum BluetoothL2capConnectableSync {
-    /// The android object for the profile
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommConnectable),
-}
-
-/// Allows building an object to connect to bluetooth devices
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommProfileAsyncTrait {
-    /// Get an object in order to accept a connection from or connect to a bluetooth peer
-    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectableAsync, String>;
-}
-
-/// Allows building an object to connect to bluetooth devices
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothRfcommProfileSyncTrait {
-    /// Get an object in order to accept a connection from or connect to a bluetooth peer
-    fn connectable(&mut self) -> Result<BluetoothRfcommConnectableSync, String>;
-}
-
-/// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothRfcommProfileAsyncTrait)]
-pub enum BluetoothRfcommProfileAsync {
-    /// The bluez library in linux is responsible for the profile
-    #[cfg(target_os = "linux")]
-    Bluez(bluer::rfcomm::ProfileHandle),
-    /// Windows RFCOMM profile
-    #[cfg(target_os = "windows")]
-    Windows(windows::BluetoothRfcommProfile),
-    /// A dummy handler
-    Dummy(Dummy),
-}
-
-/// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothRfcommProfileSyncTrait)]
-pub enum BluetoothRfcommProfileSync {
-    /// Android rfcomm profile
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommProfile),
-    /// A dummy handler
-    Dummy(Dummy),
-}
-
-/// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothL2capProfileAsyncTrait)]
-pub enum BluetoothL2capProfileAsync {
-    /// The bluez library in linux is responsible for the profile
-    #[cfg(target_os = "linux")]
-    Bluez(bluer::rfcomm::ProfileHandle),
-    /// A dummy handler
-    Dummy(Dummy),
-}
-
-/// A bluetooth profile for rfcomm channels
-#[enum_dispatch::enum_dispatch(BluetoothL2capProfileSyncTrait)]
-pub enum BluetoothL2capProfileSync {
-    /// Android rfcomm profile
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothRfcommProfile),
-    /// A dummy handler
-    Dummy(Dummy),
-}
-
-/// A dummy struct for ensuring enums are not empty
-pub struct Dummy {}
-
-impl BluetoothRfcommProfileSyncTrait for Dummy {
-    fn connectable(&mut self) -> Result<BluetoothRfcommConnectableSync, String> {
-        unimplemented!()
-    }
-}
-
-impl BluetoothRfcommProfileAsyncTrait for Dummy {
-    async fn connectable(&mut self) -> Result<BluetoothRfcommConnectableAsync, String> {
-        unimplemented!()
-    }
-}
-
-/// The common functions for all bluetooth rfcomm sockets
-#[enum_dispatch::enum_dispatch]
-pub trait BluetoothSocketTrait {
-    /// Is the socket connected
-    fn is_connected(&self) -> Result<bool, std::io::Error>;
-    #[cfg(feature = "async")]
-    /// connect the socket
-    async fn async_connect(&mut self) -> Result<(), std::io::Error>;
-    /// connect the socket
-    fn sync_connect(&mut self) -> Result<(), std::io::Error>;
-}
+#[cfg(all(target_os = "android", feature = "sync"))]
+/// A bluetooth profile for l2cap channels
+pub type BluetoothL2capProfile = android::BluetoothRfcommProfile;
 
 /// A bluetooth rfcomm socket
-#[enum_dispatch::enum_dispatch(BluetoothSocketTrait)]
-pub enum BluetoothSocket {
-    /// The android based rfcomm socket
-    #[cfg(target_os = "android")]
-    Android(android::BluetoothSocket),
-    /// Linux using bluez library
-    #[cfg(target_os = "linux")]
-    Bluez(linux::BluetoothRfcommSocket),
-    /// Windows bluetooth socket
-    #[cfg(target_os = "windows")]
-    Windows(windows::BluetoothRfcommSocket),
-}
+#[cfg(target_os = "android")]
+pub type BluetoothSocket = android::BluetoothSocket;
 
-#[cfg(feature = "sync")]
-impl std::io::Read for BluetoothSocket {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            #[cfg(target_os = "android")]
-            Self::Android(a) => a.read(buf),
-            #[cfg(target_os = "linux")]
-            Self::Bluez(a) => a.read(buf),
-            #[cfg(target_os = "windows")]
-            Self::Windows(a) => a.read(buf),
-        }
-    }
-}
+/// A bluetooth rfcomm socket
+#[cfg(target_os = "linux")]
+pub type BluetoothSocket = linux::BluetoothRfcommSocket;
 
-#[cfg(feature = "sync")]
-impl std::io::Write for BluetoothSocket {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            #[cfg(target_os = "android")]
-            Self::Android(a) => a.write(buf),
-            #[cfg(target_os = "linux")]
-            Self::Bluez(a) => a.write(buf),
-            #[cfg(target_os = "windows")]
-            Self::Windows(a) => a.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            #[cfg(target_os = "android")]
-            Self::Android(a) => a.flush(),
-            #[cfg(target_os = "linux")]
-            Self::Bluez(a) => a.flush(),
-            #[cfg(target_os = "windows")]
-            Self::Windows(a) => a.flush(),
-        }
-    }
-}
+/// A bluetooth rfcomm socket
+#[cfg(target_os = "windows")]
+pub type BluetoothSocket = windows::BluetoothRfcommSocket;
