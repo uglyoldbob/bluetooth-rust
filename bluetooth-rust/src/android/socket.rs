@@ -29,7 +29,6 @@ pub struct BluetoothSocket {
     output_stream: jni::objects::Global<JObject<'static>>,
     array_write: jni::objects::Global<JObject<'static>>,
     uuid: String,
-    _marker: PhantomData<*const ()>,
 }
 
 impl std::fmt::Debug for BluetoothSocket {
@@ -143,7 +142,6 @@ impl BluetoothSocket {
                 output_stream,
                 array_write,
                 uuid: uuid.to_string(),
-                _marker: PhantomData,
             })
         })
         .map_err(jerr)
