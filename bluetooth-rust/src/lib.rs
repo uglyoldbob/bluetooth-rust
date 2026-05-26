@@ -237,7 +237,7 @@ pub type BluetoothDevice = linux::LinuxBluetoothDevice;
 
 /// A bluetooth device
 #[cfg(target_os = "windows")]
-pub type BluetoothDevice = windows::LinuxBluetoothDevice;
+pub type BluetoothDevice = windows::BluetoothDevice;
 
 /// Represents a bluetooth adapter that communicates to bluetooth devices
 #[cfg(target_os = "android")]

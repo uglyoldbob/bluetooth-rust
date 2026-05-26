@@ -11,13 +11,13 @@ license = "MIT OR Apache-2.0"
 async-trait = { version = "0.1.88", optional=true }
 bytes = "1.11.1"
 futures = "0.3.30"
-libc = "0.2.185"
 log = "0.4"
 serde = {version = "1.0.219", features = ["derive"]}
 tokio = { version = "1.40.0", features = ["full"], optional=true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 bluer = {version = "0.17.3", features = ["bluetoothd", "rfcomm", "l2cap"] }
+libc = "0.2.185"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
@@ -28,6 +28,7 @@ windows = { version = "0.62", features = [
     "Foundation_Collections",
     "Networking_Sockets",
     "Storage_Streams",
+    "Win32_Devices_Bluetooth",
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]

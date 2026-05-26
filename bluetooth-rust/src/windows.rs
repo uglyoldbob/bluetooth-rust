@@ -13,7 +13,7 @@ use windows::{
     Devices::Bluetooth::Rfcomm::{RfcommServiceId, RfcommServiceProvider},
     Devices::Bluetooth::{BluetoothAdapter as WinBtAdapter, BluetoothDevice as WinBtDevice},
     Devices::Enumeration::{DeviceInformation, DeviceWatcher},
-    Foundation::{EventRegistrationToken, TypedEventHandler},
+    Foundation::TypedEventHandler,
     Networking::Sockets::{
         SocketProtectionLevel, StreamSocket, StreamSocketListener,
         StreamSocketListenerConnectionReceivedEventArgs,
@@ -150,7 +150,7 @@ pub struct BluetoothRfcommConnectable {
     socket: StreamSocket,
 }
 
-impl super::BluetoothRfcommConnectableAsyncTrait for BluetoothRfcommConnectable {
+impl BluetoothRfcommConnectable {
     async fn accept(self) -> Result<crate::BluetoothStream, String> {
         let stream = WindowsRfcommStream::new(self.socket).map_err(|e| e.to_string())?;
         Ok(crate::BluetoothStream::Windows(stream))
