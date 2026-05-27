@@ -29,6 +29,7 @@ windows = { version = "0.62", features = [
     "Networking_Sockets",
     "Storage_Streams",
     "Win32_Devices_Bluetooth",
+    "Win32_Networking_WinSock",
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]

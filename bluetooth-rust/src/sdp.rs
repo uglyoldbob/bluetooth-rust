@@ -353,15 +353,15 @@ mod platform {
     use std::io::{Read, Write};
 
     use windows::Win32::Devices::Bluetooth::{
-        AF_BTH, BTHPROTO_L2CAP, BTH_ADDR, SOCKADDR_BTH,
+        AF_BTH, BTHPROTO_L2CAP, SOCKADDR_BTH,
     };
     use windows::Win32::Networking::WinSock::{
         closesocket, connect, recv, send, socket, WSACleanup, WSAStartup, INVALID_SOCKET, SOCK_SEQPACKET,
         SOCKET, WSADATA,
     };
 
-    fn parse_mac_as_bth_addr(mac: &str) -> Result<BTH_ADDR, std::io::Error> {
-        // BTH_ADDR is a u64; bytes go in MSB-first (same order as MAC string)
+    fn parse_mac_as_u64(mac: &str) -> Result<u64, std::io::Error> {
+        // u64 is a u64; bytes go in MSB-first (same order as MAC string)
         let parts: Vec<&str> = mac.split(':').collect();
         if parts.len() != 6 {
             return Err(std::io::Error::other("invalid MAC address format"));
@@ -407,17 +407,17 @@ mod platform {
                 BTHPROTO_L2CAP as i32,
             )
         };
-        if sock == INVALID_SOCKET {
+        if Ok(INVALID_SOCKET) == sock {
             return Err(std::io::Error::last_os_error());
         }
-        let sock = OwnedSocket(sock);
+        let sock = OwnedSocket(sock.unwrap());
 
         // ── 3. Connect ────────────────────────────────────────────────────
-        let bth_addr = parse_mac_as_bth_addr(mac)?;
+        let u64 = parse_mac_as_u64(mac)?;
 
         let addr = SOCKADDR_BTH {
             addressFamily: AF_BTH,
-            btAddr: bth_addr,
+            btAddr: u64,
             serviceClassId: windows::core::GUID::zeroed(),
             port: 1, // SDP PSM
         };
@@ -441,7 +441,7 @@ mod platform {
                 send(
                     sock.0,
                     &req[sent..],
-                    0,
+                    windows::Win32::Networking::WinSock::SEND_RECV_FLAGS(0),
                 )
             };
             if n < 0 {
@@ -452,7 +452,7 @@ mod platform {
 
         // ── 5. Receive SDP response ───────────────────────────────────────
         let mut buf = [0u8; 4096];
-        let n = unsafe { recv(sock.0, &mut buf, 0) };
+        let n = unsafe { recv(sock.0, &mut buf, windows::Win32::Networking::WinSock::SEND_RECV_FLAGS(0)) };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }

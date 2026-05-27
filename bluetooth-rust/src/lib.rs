@@ -313,9 +313,9 @@ impl BluetoothAdapterBuilder {
         }
         #[cfg(target_os = "windows")]
         {
-            return Ok(BluetoothAdapter::Windows(
+            return Ok(
                 windows::BluetoothHandler::new(self.s.unwrap()).await?,
-            ));
+            );
         }
     }
 }
@@ -371,6 +371,10 @@ pub type BluetoothL2capProfile = linux::BluetoothL2capProfile;
 #[cfg(all(target_os = "android", feature = "sync"))]
 /// A bluetooth profile for l2cap channels
 pub type BluetoothL2capProfile = android::BluetoothRfcommProfile;
+
+#[cfg(target_os = "windows")]
+/// A bluetooth profile for l2cap channels
+pub type BluetoothL2capProfile = ();
 
 /// A bluetooth rfcomm socket
 #[cfg(target_os = "android")]

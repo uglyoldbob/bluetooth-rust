@@ -153,7 +153,7 @@ pub struct BluetoothRfcommConnectable {
 impl BluetoothRfcommConnectable {
     async fn accept(self) -> Result<crate::BluetoothStream, String> {
         let stream = WindowsRfcommStream::new(self.socket).map_err(|e| e.to_string())?;
-        Ok(crate::BluetoothStream::Windows(stream))
+        Ok(stream)
     }
 }
 
@@ -174,7 +174,7 @@ pub struct BluetoothRfcommProfile {
     /// event handler.
     rx: tokio::sync::mpsc::Receiver<StreamSocket>,
     /// Token used to unregister the `ConnectionReceived` handler on drop.
-    token: EventRegistrationToken,
+    token: i64,
 }
 
 impl Drop for BluetoothRfcommProfile {
@@ -185,15 +185,15 @@ impl Drop for BluetoothRfcommProfile {
     }
 }
 
-impl super::BluetoothRfcommProfileAsyncTrait for BluetoothRfcommProfile {
-    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectableAsync, String> {
+impl BluetoothRfcommProfile {
+    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
         self.rx
             .recv()
             .await
             .map(|socket| {
-                crate::BluetoothRfcommConnectableAsync::Windows(BluetoothRfcommConnectable {
+                BluetoothRfcommConnectable {
                     socket,
-                })
+                }
             })
             .ok_or_else(|| "Connection channel closed".to_string())
     }
@@ -219,8 +219,6 @@ impl BluetoothDiscovery {
     }
 }
 
-impl super::BluetoothDiscoveryTrait for BluetoothDiscovery {}
-
 impl Drop for BluetoothDiscovery {
     fn drop(&mut self) {
         let _ = self.watcher.Stop();
@@ -237,7 +235,7 @@ pub struct BluetoothDevice {
     inner: WinBtDevice,
 }
 
-impl super::BluetoothDeviceTrait for BluetoothDevice {
+impl BluetoothDevice {
     fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         // UUIDs are obtained by calling GetRfcommServicesAsync() and collecting
         // the ServiceId GUIDs from each returned RfcommDeviceService — an async
@@ -318,7 +316,7 @@ pub struct BluetoothRfcommSocket {
     connected: bool,
 }
 
-impl crate::BluetoothSocketTrait for BluetoothRfcommSocket {
+impl BluetoothRfcommSocket {
     fn is_connected(&self) -> Result<bool, std::io::Error> {
         Ok(self.connected)
     }
@@ -361,23 +359,11 @@ pub struct BluetoothHandler {
     _sender: tokio::sync::mpsc::Sender<super::MessageToBluetoothHost>,
 }
 
-impl super::BluetoothAdapterTrait for BluetoothHandler {
-    fn supports_async(&mut self) -> Option<&mut dyn super::AsyncBluetoothAdapterTrait> {
-        Some(self)
-    }
-
-    fn supports_sync(&mut self) -> Option<&mut dyn super::SyncBluetoothAdapterTrait> {
-        // All Windows BT APIs are inherently async; no sync adapter is provided.
-        None
-    }
-}
-
-#[async_trait::async_trait]
-impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
+impl BluetoothHandler {
     async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,
-    ) -> Result<crate::BluetoothRfcommProfileAsync, String> {
+    ) -> Result<crate::BluetoothRfcommProfile, String> {
         // 1. Build the RFCOMM service ID from the profile UUID.
         let guid = parse_uuid_to_guid(&settings.uuid)?;
         let service_id = RfcommServiceId::FromUuid(guid).map_err(|e| e.to_string())?;
@@ -400,7 +386,7 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
                 StreamSocketListener,
                 StreamSocketListenerConnectionReceivedEventArgs,
             >::new(move |_sender, args| {
-                if let Some(args) = args {
+                if let Some(args) = args.as_ref() {
                     if let Ok(socket) = args.Socket() {
                         let _ = tx.try_send(socket);
                     }
@@ -435,20 +421,20 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
             .StartAdvertising(&listener)
             .map_err(|e| e.to_string())?;
 
-        Ok(crate::BluetoothRfcommProfileAsync::Windows(
+        Ok(
             BluetoothRfcommProfile {
                 provider,
                 listener,
                 rx,
                 token,
             },
-        ))
+        )
     }
 
     async fn register_l2cap_profile(
         &self,
         _settings: super::BluetoothL2capProfileSettings,
-    ) -> Result<crate::BluetoothL2capProfileAsync, String> {
+    ) -> Result<crate::BluetoothL2capProfile, String> {
         // Classic BT L2CAP profile registration is not exposed via WinRT.
         Err(
             "Classic Bluetooth L2CAP profile registration is not supported              on Windows via WinRT"
@@ -485,9 +471,9 @@ impl super::AsyncBluetoothAdapterTrait for BluetoothHandler {
                     .await
                     .map_err(|e| e.to_string())
             }) {
-                devices.push(crate::BluetoothDevice::Windows(BluetoothDevice {
+                devices.push(BluetoothDevice {
                     inner: device,
-                }));
+                });
             }
         }
         Some(devices)
