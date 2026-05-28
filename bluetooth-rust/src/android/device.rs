@@ -16,7 +16,7 @@ pub struct BluetoothDevice {
 
 impl BluetoothDevice {
     /// Run the sdp protocol
-    pub fn run_sdp(&mut self, uuid: crate::BluetoothUuid) -> Result<crate::ServiceRecord, String> {
+    pub fn run_sdp(&self) -> Result<crate::ServiceRecord, String> {
         let java = jni_min_helper::jni_get_vm();
         let mut env = java
             .attach_current_thread(|env| {
@@ -238,6 +238,9 @@ impl BluetoothDevice {
                     &[],
                 )?
                 .l()?;
+            if objs.is_null() {
+                return Ok(Vec::new());
+            }
             let temp = env.new_local_ref(&objs)?;
             let jarr = env.cast_local::<jni::objects::JObjectArray>(temp)?;
             let len = env.get_array_length(&jarr)?;

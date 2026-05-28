@@ -73,7 +73,23 @@ pub struct BluetoothDiscovery {
 
 impl BluetoothDiscovery {
     fn new(adapter: jni::refs::Global<JObject<'static>>) -> Self {
-        Self { adapter }
+        let mut s = Self { adapter };
+        s.start();
+        s
+    }
+
+    fn start(&mut self) {
+        let java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            let a = env.call_method(
+                &self.adapter,
+                jni::jni_str!("startDiscovery"),
+                jni::jni_sig!("()Z"),
+                &[],
+            );
+            log::error!("Start discovery {:?}", a);
+            Ok::<(), jni::errors::Error>(())
+        });
     }
 }
 
@@ -263,6 +279,26 @@ impl Bluetooth {
     ) -> Result<crate::BluetoothL2capProfile, String> {
         todo!()
     }
+    
+    /// Get the remote device with the hardware address
+    pub fn get_remote_device<'local>(
+        &self,
+        address: &str,
+    ) -> Result<BluetoothDevice, jni::errors::Error> {
+        let mut java = jni_min_helper::jni_get_vm();
+        java.attach_current_thread(|env| {
+            let mac = env.new_string(address)?;
+            let device = env.call_method(
+                &self.adapter,
+                jni::jni_str!("getRemoteDevice"),
+                jni::jni_sig!("(Ljava/lang/String;)Landroid/bluetooth/BluetoothDevice;"),
+                &[jni::JValue::Object(&mac)],
+            )?.l()?;
+            Ok(BluetoothDevice::new(
+                env.new_global_ref(device)?,
+            ))
+        })
+    }
 
     fn register_rfcomm_profile(
         &self,
@@ -420,7 +456,8 @@ impl Bluetooth {
         }
     }
 
-    fn start_discovery(&self) -> crate::BluetoothDiscovery {
+    /// Start bluetooth discovery
+    pub fn start_discovery(&self) -> crate::BluetoothDiscovery {
         let mut java = jni_min_helper::jni_get_vm();
         let ss = java
             .attach_current_thread(|env| env.new_global_ref(self.adapter.as_obj()))
