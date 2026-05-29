@@ -124,10 +124,10 @@ impl SdpElement {
 
 #[derive(Debug)]
 pub struct SdpResponse {
-    pub pdu_id: u8,
-    pub transaction_id: u16,
-    pub parameter_length: u16,
-    pub attribute_lists_byte_count: u16,
+    pub _pdu_id: u8,
+    pub _transaction_id: u16,
+    pub _parameter_length: u16,
+    pub _attribute_lists_byte_count: u16,
     pub records: Vec<ServiceRecord>,
 }
 
@@ -155,6 +155,7 @@ impl ServiceRecord {
         Ok(ServiceRecord { attributes: attrs })
     }
 
+    /// Get the rfcomm channel for the record
     pub fn rfcomm_channel(&self) -> Option<u8> {
         let proto = self.attributes.get(&0x0004)?;
         let SdpElement::Sequence(layers) = proto else {
@@ -205,10 +206,10 @@ impl SdpResponse {
         };
 
         Ok(SdpResponse {
-            pdu_id,
-            transaction_id,
-            parameter_length,
-            attribute_lists_byte_count: attr_len,
+            _pdu_id: pdu_id,
+            _transaction_id: transaction_id,
+            _parameter_length: parameter_length,
+            _attribute_lists_byte_count: attr_len,
             records,
         })
     }
@@ -283,6 +284,7 @@ mod platform {
         l2_bdaddr_type: u8,
     }
 
+    /// Run the sdp algorithm
     pub fn run_sdp(mac: &str, uuid: u16) -> std::io::Result<ServiceRecord> {
         let bdaddr = parse_mac(mac)?;
 
@@ -484,10 +486,7 @@ mod platform {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API — delegates to the active platform module
-// ─────────────────────────────────────────────────────────────────────────────
-
+/// run the service discovery protocol for the given bluetooth hardware address and uuid short form
 pub fn run_sdp(mac: &str, uuid: u16) -> std::io::Result<ServiceRecord> {
     platform::run_sdp(mac, uuid)
 }

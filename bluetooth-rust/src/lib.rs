@@ -29,8 +29,8 @@ pub use bluetooth_uuid::BluetoothUuid;
 #[cfg(not(target_os = "android"))]
 mod sdp;
 
-#[cfg(target_os = "linux")]
-use sdp::ServiceRecord;
+#[cfg(not(target_os = "android"))]
+pub use sdp::run_sdp;
 
 #[cfg(target_os = "android")]
 type ServiceRecord = ();

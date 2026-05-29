@@ -250,11 +250,13 @@ impl tokio::io::AsyncWrite for BluetoothRfcommSocket {
 }
 
 impl BluetoothRfcommSocket {
-    fn is_connected(&self) -> Result<bool, std::io::Error> {
+    /// returns Ok(true) if connected
+    pub fn is_connected(&self) -> Result<bool, std::io::Error> {
         Ok(self.connection.is_some())
     }
 
-    async fn async_connect(&mut self) -> Result<(), std::io::Error> {
+    /// Connect to the socket, async
+    pub async fn async_connect(&mut self) -> Result<(), std::io::Error> {
         if self.connection.is_some() {
             return Ok(());
         }
@@ -329,7 +331,8 @@ impl LinuxBluetoothDevice {
 }
 
 impl LinuxBluetoothDevice {
-    async fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
+    /// Get the uuids for the device
+    pub async fn get_uuids(&mut self) -> Result<Vec<crate::BluetoothUuid>, std::io::Error> {
         let uuids = self
             .device
             .uuids()
@@ -348,7 +351,7 @@ impl LinuxBluetoothDevice {
 
     /// Returns the alias (display name) of the device, falling back to the
     /// hardware name when no alias is set.
-    async fn get_name(&self) -> Result<String, std::io::Error> {
+    pub async fn get_name(&self) -> Result<String, std::io::Error> {
         let device = self.device.clone();
         device
             .alias()
@@ -383,10 +386,10 @@ impl LinuxBluetoothDevice {
     /// `// TODO` below; the default PSM of 1 (SDP channel itself) is a
     /// placeholder and will need to be replaced with the actual dynamic PSM
     /// discovered via SDP for real services.
-    fn get_l2cap_socket(
+    pub fn get_l2cap_socket(
         &mut self,
         psm: u16,
-        uuid: crate::BluetoothUuid,
+        _uuid: crate::BluetoothUuid,
         is_secure: bool,
     ) -> Result<crate::BluetoothSocket, String> {
         let addr = self.device.address();
@@ -405,7 +408,7 @@ impl LinuxBluetoothDevice {
     pub fn get_rfcomm_socket(
         &mut self,
         channel: u8,
-        uuid: crate::BluetoothUuid,
+        _uuid: crate::BluetoothUuid,
         is_secure: bool,
     ) -> Result<crate::BluetoothSocket, String> {
         let addr = self.device.address();
@@ -528,7 +531,7 @@ impl BluetoothHandler {
     /// BlueZ exposes a single `RegisterProfile` D-Bus method (ProfileManager1)
     /// that handles both RFCOMM and L2CAP profiles.  The `psm` field in the
     /// settings selects L2CAP; the RFCOMM `channel` field is left as `None`.
-    async fn register_l2cap_profile(
+    pub async fn register_l2cap_profile(
         &self,
         settings: super::BluetoothL2capProfileSettings,
     ) -> Result<crate::BluetoothL2capProfile, String> {
@@ -540,13 +543,13 @@ impl BluetoothHandler {
     }
 
     #[cfg(feature = "async")]
-    fn start_discovery(&self) -> crate::BluetoothDiscovery {
+    pub fn start_discovery(&self) -> crate::BluetoothDiscovery {
         BluetoothDiscovery::new().into()
     }
 
     #[cfg(feature = "async")]
     /// Return all paired devices across every adapter.
-    async fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
+    pub async fn get_paired_devices(&self) -> Option<Vec<crate::BluetoothDevice>> {
         let mut list = Vec::new();
         for adapter in &self.adapters {
             let result = {
@@ -572,8 +575,9 @@ impl BluetoothHandler {
         Some(list)
     }
 
+    /// Get the addresses for the bluetooth adapters
     #[cfg(feature = "async")]
-    async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
+    pub async fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
         let mut a = Vec::new();
         for adapter in &self.adapters {
             if let Ok(adr) = adapter.address().await {
@@ -583,8 +587,9 @@ impl BluetoothHandler {
         a
     }
 
+    /// Set the adapter as discoverable
     #[cfg(feature = "async")]
-    async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
+    pub async fn set_discoverable(&self, d: bool) -> Result<(), ()> {
         for adapter in &self.adapters {
             adapter.set_discoverable(d).await.map_err(|_| ())?;
         }
@@ -616,7 +621,7 @@ impl BluetoothHandler {
     }
 
     /// Enable all bluetooth adapters
-    async fn enable(&mut self) {
+    pub async fn enable(&mut self) {
         for adapter in &self.adapters {
             adapter.set_powered(true).await.unwrap();
             adapter.set_pairable(true).await.unwrap();
@@ -624,8 +629,8 @@ impl BluetoothHandler {
     }
 
     /// Disable all bluetooth adapters
-    async fn disable(&mut self) {
-        self.set_discoverable(false).await;
+    pub async fn disable(&mut self) {
+        let _ = self.set_discoverable(false).await;
         for adapter in &self.adapters {
             adapter.set_powered(false).await.unwrap();
             adapter.set_pairable(false).await.unwrap();
