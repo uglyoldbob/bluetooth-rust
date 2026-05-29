@@ -11,10 +11,6 @@ compile_error!("Must enable either the `sync` or `async` feature");
 compile_error!("Cannot enable both `sync` and `async` features simultaneously");
 
 #[cfg(target_os = "android")]
-use std::sync::Arc;
-#[cfg(target_os = "android")]
-use std::sync::Mutex;
-#[cfg(target_os = "android")]
 pub mod android;
 #[cfg(target_os = "android")]
 pub use android::Bluetooth;
@@ -30,6 +26,7 @@ mod windows;
 mod bluetooth_uuid;
 pub use bluetooth_uuid::BluetoothUuid;
 
+#[cfg(not(target_os = "android"))]
 mod sdp;
 
 #[cfg(target_os = "linux")]
@@ -169,62 +166,6 @@ pub enum PairingStatus {
     Paired,
     /// The status is unknown or invalid
     Unknown,
-}
-
-fn uuid16(uuid: u16) -> Vec<u8> {
-    let mut v = Vec::new();
-    v.push(0x19); // UUID-16 type
-    v.extend_from_slice(&uuid.to_be_bytes());
-    v
-}
-
-fn build_sdp_request(uuid: u16, transaction_id: u16) -> Vec<u8> {
-    let mut pdu = Vec::new();
-
-    // PDU ID
-    pdu.push(0x06);
-
-    // placeholder length
-    let mut params = Vec::new();
-
-    // Transaction ID
-    params.extend_from_slice(&transaction_id.to_be_bytes());
-
-    // Parameter length placeholder (filled later)
-
-    // ServiceSearchPattern: UUID 0x1101 (SPP)
-    let uuid = uuid16(uuid);
-    let mut search = Vec::new();
-    search.push(0x35); // sequence
-    search.push(uuid.len() as u8);
-    search.extend_from_slice(&uuid);
-    params.extend_from_slice(&search);
-
-    // Attribute ID list (0x0000 - 0xFFFF for everything)
-    let mut attrs = Vec::new();
-    attrs.push(0x35);
-    attrs.push(7);
-    attrs.extend_from_slice(&[
-        0x09, 0x00, 0x00, // uint16 0x0000
-        0x09, 0xFF, 0xFF, // uint16 0xFFFF
-    ]);
-    params.extend_from_slice(&attrs);
-
-    // Max attribute bytes
-    params.extend_from_slice(&0xFFFFu16.to_be_bytes());
-
-    // Continuation state
-    params.push(0x00);
-
-    // Now patch length
-    let len = params.len() as u16;
-    let mut out = Vec::new();
-    out.push(0x06);
-    out.extend_from_slice(&transaction_id.to_be_bytes());
-    out.extend_from_slice(&len.to_be_bytes());
-    out.extend_from_slice(&params);
-
-    out
 }
 
 /// A bluetooth device

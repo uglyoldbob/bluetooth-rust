@@ -4,9 +4,7 @@ use super::BluetoothSocket;
 use super::{ParcelUuid, jerr};
 use crate::BluetoothUuid;
 use jni::objects::JObject;
-use jni_min_helper::*;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 
 /// an android bluetooth device
 pub struct BluetoothDevice {
@@ -18,7 +16,7 @@ impl BluetoothDevice {
     /// Run the sdp protocol
     pub fn run_sdp(&self) -> Result<crate::ServiceRecord, String> {
         let java = jni_min_helper::jni_get_vm();
-        let mut env = java
+        java
             .attach_current_thread(|env| {
                 let dev_name = env
                     .call_method(
@@ -48,14 +46,15 @@ impl BluetoothDevice {
                 .l()?;
             let temp = env.new_local_ref(&dev_name)?;
             let jstr = env.cast_local::<jni::objects::JString>(temp)?;
-            Ok(env.get_string(&jstr)?.to_str().to_string())
+            Ok(jstr.to_string())
         })
         .map_err(jerr)
     }
 
-    fn get_l2cap_socket(
+    /// Get an l2cap socket for the given uuid to the given device
+    pub fn get_l2cap_socket(
         &mut self,
-        psm: u16,
+        _psm: u16,
         uuid: BluetoothUuid,
         is_secure: bool,
     ) -> Result<crate::BluetoothSocket, String> {
@@ -109,7 +108,7 @@ impl BluetoothDevice {
     /// get an rfcomm socket
     pub fn get_rfcomm_socket(
         &mut self,
-        channel: u8,
+        _channel: u8,
         uuid: BluetoothUuid,
         is_secure: bool,
     ) -> Result<crate::BluetoothSocket, String> {
@@ -173,8 +172,9 @@ impl BluetoothDevice {
         }
     }
 
+    /// Get the user-friendly name of the bluetooth device
     #[cfg(feature = "sync")]
-    fn get_name(&self) -> Result<String, std::io::Error> {
+    pub fn get_name(&self) -> Result<String, std::io::Error> {
         let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let dev_name = env
@@ -187,7 +187,7 @@ impl BluetoothDevice {
                 .l()?;
             let temp = env.new_local_ref(&dev_name)?;
             let jstr = env.cast_local::<jni::objects::JString>(temp)?;
-            Ok(env.get_string(&jstr)?.to_str().to_string())
+            Ok(jstr.to_string())
         })
         .map_err(jerr)
     }
@@ -243,10 +243,10 @@ impl BluetoothDevice {
             }
             let temp = env.new_local_ref(&objs)?;
             let jarr = env.cast_local::<jni::objects::JObjectArray>(temp)?;
-            let len = env.get_array_length(&jarr)?;
+            let len = jarr.len(env)?;
             let mut vec = Vec::with_capacity(len as usize);
             for i in 0..len as usize {
-                let temp = env.get_object_array_element(&jarr, i)?;
+                let temp = jarr.get_element(env, i)?;
                 let uuid = env.new_global_ref(temp)?;
                 vec.push(ParcelUuid::new(uuid));
             }

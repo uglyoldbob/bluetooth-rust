@@ -254,13 +254,6 @@ impl BluetoothRfcommSocket {
         Ok(self.connection.is_some())
     }
 
-    fn sync_connect(&mut self) -> Result<(), std::io::Error> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "sync not supported",
-        ))
-    }
-
     async fn async_connect(&mut self) -> Result<(), std::io::Error> {
         if self.connection.is_some() {
             return Ok(());
@@ -363,7 +356,8 @@ impl LinuxBluetoothDevice {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
     }
 
-    async fn get_pair_state(&self) -> Result<crate::PairingStatus, std::io::Error> {
+    /// Get the pairing state of the device
+    pub async fn get_pair_state(&self) -> Result<crate::PairingStatus, std::io::Error> {
         let device = self.device.clone();
         let paired = device
             .is_paired()
@@ -376,7 +370,8 @@ impl LinuxBluetoothDevice {
         })
     }
 
-    fn get_address(&mut self) -> Result<String, std::io::Error> {
+    /// Get the hardware address of the device
+    pub fn get_address(&mut self) -> Result<String, std::io::Error> {
         Ok(self.device.address().to_string())
     }
 
@@ -407,7 +402,7 @@ impl LinuxBluetoothDevice {
     /// left as a `// TODO` below; channel 1 is used as a placeholder and will
     /// need to be replaced with the channel discovered via SDP for real
     /// services (e.g. by using `sdptool` or an external SDP library).
-    fn get_rfcomm_socket(
+    pub fn get_rfcomm_socket(
         &mut self,
         channel: u8,
         uuid: crate::BluetoothUuid,

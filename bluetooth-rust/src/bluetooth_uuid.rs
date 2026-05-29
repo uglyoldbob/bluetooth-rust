@@ -1,15 +1,9 @@
 //! UUID stuff for android bluetooth
 
 #[cfg(target_os = "android")]
-use super::android::Java;
-#[cfg(target_os = "android")]
 use super::android::jerr;
 #[cfg(target_os = "android")]
 use jni::objects::JObject;
-#[cfg(target_os = "android")]
-use jni_min_helper::*;
-#[cfg(target_os = "android")]
-use std::sync::{Arc, Mutex};
 
 /// Represents the uuid for a bluetooth service
 #[derive(Debug, PartialEq)]
@@ -75,7 +69,7 @@ impl BluetoothUuid {
             BluetoothUuid::HspHs => 0x1108,
             BluetoothUuid::HspAg => 0x1112,
             BluetoothUuid::AndroidAuto => 0x7a00,
-            BluetoothUuid::Custom(a, b) => *b,
+            BluetoothUuid::Custom(_a, b) => *b,
             BluetoothUuid::Unknown(s) => u16::from_str_radix(&s[4..8], 16).unwrap(),
         }
     }
@@ -100,7 +94,7 @@ impl BluetoothUuid {
             BluetoothUuid::HspHs => "00001108-0000-1000-8000-00805f9b34fb",
             BluetoothUuid::HspAg => "00001112-0000-1000-8000-00805f9b34fb",
             BluetoothUuid::AndroidAuto => "4de17a00-52cb-11e6-bdf4-0800200c9a66",
-            BluetoothUuid::Custom(a, b) => a,
+            BluetoothUuid::Custom(a, _b) => a,
             BluetoothUuid::Unknown(s) => s,
         }
     }
@@ -174,7 +168,7 @@ impl ParcelUuid {
                 .l()?;
             let temp = env.new_local_ref(&dev_name)?;
             let jstr = env.cast_local::<jni::objects::JString>(temp)?;
-            Ok(env.get_string(&jstr)?.to_str().to_string())
+            Ok(jstr.to_string())
         })
         .map_err(jerr)
     }

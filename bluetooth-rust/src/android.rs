@@ -2,14 +2,12 @@
 
 use jni::objects::JObject;
 use jni::refs::Global;
-use jni::sys::_jobject;
-use jni_min_helper::*;
 use winit::platform::android::activity::AndroidApp;
 
 #[cfg(feature = "async")]
 compile_error!("Android does not support async");
 
-static JAVA_CONTEXT: OnceLock<Arc<::jni::refs::Global<::jni::objects::JObject>>> = OnceLock::new();
+static JAVA_CONTEXT: OnceLock<Arc<Global<::jni::objects::JObject>>> = OnceLock::new();
 
 /// Maps unexpected JNI errors to `std::io::Error`.
 #[inline(always)]
@@ -80,7 +78,7 @@ impl BluetoothDiscovery {
 
     fn start(&mut self) {
         let java = jni_min_helper::jni_get_vm();
-        java.attach_current_thread(|env| {
+        let _ = java.attach_current_thread(|env| {
             let a = env.call_method(
                 &self.adapter,
                 jni::jni_str!("startDiscovery"),
@@ -112,58 +110,24 @@ impl Drop for BluetoothDiscovery {
 /// And object used for communication with a remote bluetooth device
 pub struct RfcommStream {
     /// The BluetoothSocket object
-    socket: OnceLock<::jni::refs::Global<JObject<'static>>>,
-    /// The input stream
-    input: OnceLock<::jni::refs::Global<JObject<'static>>>,
-    /// The output stream
-    output: OnceLock<::jni::refs::Global<JObject<'static>>>,
+    socket: jni::refs::Global<JObject<'static>>,
 }
 
 impl RfcommStream {
-    /// Build a new Self, getting the input and output streams needed for communication
-    pub fn new(socket: OnceLock<::jni::refs::Global<JObject<'static>>>) -> Result<Self, String> {
-        let (input, output) = {
-            let java = jni_min_helper::jni_get_vm();
-            java.attach_current_thread(|env| {
-                let socket = socket.get().unwrap().as_obj();
-                let e = env
-                    .call_method(
-                        socket,
-                        jni::jni_str!("getInputStream"),
-                        jni::jni_sig!("()Ljava/io/InputStream;"),
-                        &[],
-                    )?
-                    .l()?;
-                let input = env.new_global_ref(&e)?;
-                let e = env
-                    .call_method(
-                        socket,
-                        jni::jni_str!("getOutputStream"),
-                        jni::jni_sig!("()Ljava/io/OutputStream;"),
-                        &[],
-                    )?
-                    .l()?;
-                let output = env.new_global_ref(&e)?;
-                Ok::<(Global<JObject<'static>>, Global<JObject<'static>>), jni::errors::Error>((
-                    input, output,
-                ))
-            })
-            .map_err(|e| jerr(e).to_string())?
-        };
+    /// Build a new Self
+    pub fn new(socket: jni::refs::Global<JObject<'static>>) -> Result<Self, String> {
         Ok(Self {
             socket,
-            input: input.into(),
-            output: output.into(),
         })
     }
 }
 
 impl std::io::Read for RfcommStream {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let ba = env.new_byte_array(buf.len() as usize)?;
-            let socket = self.socket.get().unwrap().as_obj();
+            let socket = self.socket.as_obj();
             let l = env
                 .call_method(
                     socket,
@@ -182,10 +146,10 @@ impl std::io::Read for RfcommStream {
 
 impl std::io::Write for RfcommStream {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let ba = env.byte_array_from_slice(buf)?;
-            let socket = self.socket.get().unwrap().as_obj();
+            let socket = self.socket.as_obj();
             let _ = env
                 .call_method(
                     socket,
@@ -199,9 +163,9 @@ impl std::io::Write for RfcommStream {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
-            let socket = self.socket.get().unwrap().as_obj();
+            let socket = self.socket.as_obj();
             let _ = env
                 .call_method(socket, jni::jni_str!("flush"), jni::jni_sig!("()V"), &[])?;
             Ok(())
@@ -213,22 +177,22 @@ impl std::io::Write for RfcommStream {
 /// Very similar to the BluetoothRfcommProfile
 pub struct BluetoothRfcommConnectable {
     /// A socket that can be used to accept bluetooth connections
-    socket: OnceLock<::jni::refs::Global<JObject<'static>>>,
+    socket: jni::refs::Global<JObject<'static>>,
 }
 
 impl BluetoothRfcommConnectable {
-    fn accept(
+    /// Accept a connection from a remote device
+    pub fn accept(
         self,
         timeout: std::time::Duration,
     ) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         let a = java
             .attach_current_thread(|env| {
                 let millis = (timeout.as_millis() as i32).into();
-                let socket = self.socket.get().unwrap().as_obj();
                 let e = env
                     .call_method(
-                        socket,
+                        self.socket.as_obj(),
                         jni::jni_str!("accept"),
                         jni::jni_sig!("(I)Landroid/bluetooth/BluetoothSocket;"),
                         &[millis],
@@ -238,9 +202,7 @@ impl BluetoothRfcommConnectable {
                 Ok(socket)
             })
             .map_err(|e| jerr(e).to_string())?;
-        let mut aa = OnceLock::new();
-        aa.set(a);
-        let s = RfcommStream::new(aa)?;
+        let s = RfcommStream::new(a)?;
         Ok((s, [0; 6], 42))
     }
 }
@@ -252,14 +214,13 @@ pub struct BluetoothRfcommProfile {
 }
 
 impl BluetoothRfcommProfile {
-    fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
-        let mut java = jni_min_helper::jni_get_vm();
+    /// Get a connectable from the profile
+    pub fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
+        let java = jni_min_helper::jni_get_vm();
         let ss = java
             .attach_current_thread(|env| env.new_global_ref(self.socket.get().unwrap()))
             .map_err(|e| jerr(e).to_string())?;
-        let s = OnceLock::new();
-        s.set(ss);
-        Ok(BluetoothRfcommConnectable { socket: s })
+        Ok(BluetoothRfcommConnectable { socket: ss })
     }
 }
 
@@ -273,19 +234,12 @@ pub struct Bluetooth {
 }
 
 impl Bluetooth {
-    fn register_l2cap_profile(
-        &self,
-        _settings: super::BluetoothL2capProfileSettings,
-    ) -> Result<crate::BluetoothL2capProfile, String> {
-        todo!()
-    }
-    
     /// Get the remote device with the hardware address
     pub fn get_remote_device<'local>(
         &self,
         address: &str,
     ) -> Result<BluetoothDevice, jni::errors::Error> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let mac = env.new_string(address)?;
             let device = env.call_method(
@@ -300,11 +254,12 @@ impl Bluetooth {
         })
     }
 
-    fn register_rfcomm_profile(
+    /// register an rfcomm profile with android
+    pub fn register_rfcomm_profile(
         &self,
         settings: crate::BluetoothRfcommProfileSettings,
     ) -> Result<crate::BluetoothRfcommProfile, String> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let jsettings = {
                 log::error!("Register rfcomm 1");
@@ -312,8 +267,8 @@ impl Bluetooth {
                 let ss = env
                     .find_class(jni::jni_str!("android/bluetooth/BluetoothSocketSettings$Builder"))?;
                 log::error!("Found builder class");
-                let builder_constructor = env
-                    .get_method_id(&ss, jni::jni_str!("<init>"), jni::jni_sig!("()V"))?;
+                //let builder_constructor = env
+                //    .get_method_id(&ss, jni::jni_str!("<init>"), jni::jni_sig!("()V"))?;
                 log::error!("Got constructor");
                 let obj = env
                     .new_object(&ss, jni::jni_sig!("()V"), &[])?;
@@ -413,33 +368,40 @@ impl Bluetooth {
         }).map_err(|e| jerr(e).to_string())
     }
 
-    fn set_discoverable(&self, d: bool) -> Result<(), ()> {
-        let mut java = jni_min_helper::jni_get_vm();
-        java.attach_current_thread(|env| {
-            let context = JAVA_CONTEXT.get().unwrap();
-            let context = env.new_local_ref(context.as_obj())?;
-            let arg = env.new_string("android.bluetooth.adapter.action.REQUEST_DISCOVERABLE")?;
-            let intent = env
-                .new_object(
-                    jni::jni_str!("android/content/Intent"),
-                    jni::jni_sig!("(Ljava/lang/String;)V"),
-                    &[(&arg).into()],
-                )
-                .unwrap();
-            let mut args = Vec::new();
-            args.push(&intent);
-            let mut args2: Vec<jni::objects::JValue> =
-                args.iter().map(|a| a.try_into().unwrap()).collect();
-            args2.push(1.into());
-            let a = env.call_method(
-                context,
-                jni::jni_str!("startActivityForResult"),
-                jni::jni_sig!("(Landroid/content/Intent;I)V"),
-                args2.as_slice(),
-            );
-            log::error!("Results of bluetooth enable discoverable is {:?}", a);
+    /// Set the bluetooth adapter as discoverable for a certain period of time
+    /// Setting as non-discoverable does nothing
+    pub fn set_discoverable(&self, d: bool) -> Result<(), ()> {
+        if d {
+            let java = jni_min_helper::jni_get_vm();
+            java.attach_current_thread(|env| {
+                let context = JAVA_CONTEXT.get().unwrap();
+                let context = env.new_local_ref(context.as_obj())?;
+                let arg = env.new_string("android.bluetooth.adapter.action.REQUEST_DISCOVERABLE")?;
+                let intent = env
+                    .new_object(
+                        jni::jni_str!("android/content/Intent"),
+                        jni::jni_sig!("(Ljava/lang/String;)V"),
+                        &[(&arg).into()],
+                    )
+                    .unwrap();
+                let mut args = Vec::new();
+                args.push(&intent);
+                let mut args2: Vec<jni::objects::JValue> =
+                    args.iter().map(|a| a.try_into().unwrap()).collect();
+                args2.push(1.into());
+                let a = env.call_method(
+                    context,
+                    jni::jni_str!("startActivityForResult"),
+                    jni::jni_sig!("(Landroid/content/Intent;I)V"),
+                    args2.as_slice(),
+                );
+                log::error!("Results of bluetooth enable discoverable is {:?}", a);
+                Ok(())
+            }).map_err(|_e: jni::errors::Error| ())
+        }
+        else {
             Ok(())
-        }).map_err(|_e: jni::errors::Error| ())
+        }
     }
 
     /// get paired bluetooth devices
@@ -458,16 +420,16 @@ impl Bluetooth {
 
     /// Start bluetooth discovery
     pub fn start_discovery(&self) -> crate::BluetoothDiscovery {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         let ss = java
             .attach_current_thread(|env| env.new_global_ref(self.adapter.as_obj()))
             .map_err(|e| jerr(e).to_string()).unwrap();
         BluetoothDiscovery::new(ss).into()
     }
 
-    fn addresses(&self) -> Vec<super::BluetoothAdapterAddress> {
-        let mut a = Vec::new();
-        let mut java = jni_min_helper::jni_get_vm();
+    /// Get the bluetooth adapter hardware address(es?)
+    pub fn addresses(&self) -> Option<super::BluetoothAdapterAddress> {
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let dev_name = env
                 .call_method(
@@ -478,12 +440,9 @@ impl Bluetooth {
                 )?
                 .l()?;
             let temp = env.new_local_ref(&dev_name)?;
-            let n = env.cast_local::<jni::objects::JString>(temp);
-            if let Ok(n) = n {
-                a.push(super::BluetoothAdapterAddress::String(env.get_string(&n)?.to_str().to_string()));
-            }
-            Ok::<_, jni::errors::Error>(a)
-        }).unwrap()
+            let n = env.cast_local::<jni::objects::JString>(temp)?;
+            Ok::<_, jni::errors::Error>(super::BluetoothAdapterAddress::String(n.to_string()))
+        }).ok()
     }
 }
 
@@ -517,7 +476,7 @@ impl Bluetooth {
                 }
                 let temp = env.new_local_ref(&action)?;
                 let jstr = env.cast_local::<jni::objects::JString>(temp)?;
-                let _ = env.get_string(&jstr)?.to_str().to_string();
+                let _ = jstr.to_string();
                 Ok(())
             })
             .unwrap();
@@ -533,15 +492,13 @@ impl Bluetooth {
     /// Request permission if it is not present because we need it
     pub fn try_get_permissions(
         &self,
-        app: AndroidApp,
         permission: &str,
     ) -> Result<bool, std::io::Error> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let context = JAVA_CONTEXT.get().unwrap();
             if !self.check_permission2(env, &context, permission)? {
-                let mut stat = false;
-                self.get_permission2(env, &context, permission, app)
+                self.get_permission2(env, &context, permission)
             } else {
                 Ok(true)
             }
@@ -550,7 +507,7 @@ impl Bluetooth {
 
     /// Check to see if we have the specified permission
     pub fn check_permission(&self, permission: &str) -> Result<bool, std::io::Error> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let context = JAVA_CONTEXT.get().unwrap();
             self.check_permission2(env, &context, permission)
@@ -563,7 +520,6 @@ impl Bluetooth {
         env: &mut jni::Env,
         context: &jni::objects::JObject,
         permission: &str,
-        app: AndroidApp,
     ) -> Result<bool, jni::errors::Error> {
         // Get ClassLoader instance from activity
         let class_loader_obj = env
@@ -660,7 +616,7 @@ impl Bluetooth {
     pub fn enable(&mut self) {
         if !self.is_enabled() {
             log::error!("Bluetooth not enabled. Requesting it to be enabled");
-            let mut java = jni_min_helper::jni_get_vm();
+            let java = jni_min_helper::jni_get_vm();
             java.attach_current_thread(|env| {
                 let context = env.new_local_ref(JAVA_CONTEXT.get().unwrap().as_obj())?;
                 let arg = env.new_string("android.bluetooth.adapter.action.REQUEST_ENABLE")?;
@@ -693,7 +649,7 @@ impl Bluetooth {
     /// Returns the enabled state of the bluetooth adapter
     pub fn is_enabled(&mut self) -> bool {
         self.check_adapter();
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             env.call_method(&self.adapter, jni::jni_str!("isEnabled"), jni::jni_sig!("()Z"), &[])?.into_bool()
         }).unwrap()
@@ -701,7 +657,7 @@ impl Bluetooth {
 
     /// Get the list of bonded devices for the bluetooth adapter
     pub fn get_bonded_devices(&self) -> Result<Vec<BluetoothDevice>, std::io::Error> {
-        let mut java = jni_min_helper::jni_get_vm();
+        let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let dev_set = env
                 .call_method(&self.adapter, jni::jni_str!("getBondedDevices"), jni::jni_sig!("()Ljava/util/Set;"), &[])?
@@ -711,10 +667,10 @@ impl Bluetooth {
                 .l()?;
             let temp = env.new_local_ref(&jarr)?;
             let jarr = env.cast_local::<jni::objects::JObjectArray>(temp)?;
-            let len = env.get_array_length(&jarr)? as usize;
+            let len = jarr.len(env)?;
             let mut vec = Vec::with_capacity(len);
             for i in 0..len {
-                let temp = env.get_object_array_element(&jarr, i)?;
+                let temp = jarr.get_element(env, i)?;
                 vec.push(BluetoothDevice::new(
                     env.new_global_ref(temp)?,
                 ));
@@ -753,7 +709,7 @@ fn register_receiver(
     arg1: &jni_min_helper::BroadcastReceiver,
     intent_str: &str,
 ) -> Option<::jni::refs::Global<JObject<'static>>> {
-    let mut java = jni_min_helper::jni_get_vm();
+    let java = jni_min_helper::jni_get_vm();
     java.attach_current_thread(|env| {
         let context = env.new_local_ref(JAVA_CONTEXT.get().unwrap().as_obj())?;
 
@@ -780,7 +736,7 @@ fn register_receiver(
 
 /// initialize java for android
 pub fn init_java(app: &AndroidApp) {
-    let mut java = jni_min_helper::jni_get_vm();
+    let java = jni_min_helper::jni_get_vm();
     java.attach_current_thread(|env| {
         let context = unsafe {
             jni::objects::JObject::from_raw(env, app.activity_as_ptr() as *mut jni::sys::_jobject)
@@ -789,5 +745,5 @@ pub fn init_java(app: &AndroidApp) {
             .set(Arc::new(env.new_global_ref(context)?))
             .unwrap();
         Ok::<_, jni::errors::Error>(())
-    });
+    }).unwrap();
 }

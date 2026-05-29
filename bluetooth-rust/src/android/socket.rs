@@ -1,12 +1,9 @@
 //! bluetooth socket code on android
 
 use super::jerr;
-use jni::objects::Global;
 use jni::objects::JObject;
-use jni_min_helper::*;
 use std::{
     collections::VecDeque,
-    marker::PhantomData,
     sync::{Arc, Mutex},
     thread::JoinHandle,
     time::{Duration, SystemTime},
@@ -228,7 +225,7 @@ impl BluetoothSocket {
                     let tmp_read = unsafe {
                         std::slice::from_raw_parts_mut(vec_read.as_mut_ptr() as *mut i8, len)
                     };
-                    env.get_byte_array_region(array_read2, 0, tmp_read)?;
+                    array_read2.get_region(env, 0, tmp_read)?;
                     buf_read
                         .lock()
                         .unwrap()
@@ -353,7 +350,7 @@ impl std::io::Write for BluetoothSocket {
             let temp = env.new_local_ref(ab.as_obj())?;
             let array_write: jni::objects::JByteArray<'_> =
                 env.cast_local::<jni::objects::JByteArray>(temp)?;
-            let al = env.get_array_length(&array_write)? as usize;
+            let al = array_write.len(env)?;
             if al < buf.len() {
                 // replace the prepared reusable Java array with a larger array
                 let temp = env.byte_array_from_slice(buf)?.into();
@@ -363,7 +360,7 @@ impl std::io::Write for BluetoothSocket {
                 // Safety: casts `&[u8]` to `&[i8]` for `set_byte_array_region`.
                 let buf =
                     unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const i8, buf.len()) };
-                env.set_byte_array_region(array_write, 0, buf)?;
+                array_write.set_region(env, 0, buf)?;
             }
             // Safety: arguments passed to `call_method_unchecked` are correct.
             let jmethod_write = env.get_method_id(
@@ -410,7 +407,7 @@ impl std::io::Write for BluetoothSocket {
                 jni::jni_sig!("()V"),
             )?;
             unsafe {
-                let a = env.call_method_unchecked(
+                env.call_method_unchecked(
                     &self.output_stream,
                     jmethod_flush,
                     jni::signature::ReturnType::Primitive(jni::signature::Primitive::Void),
