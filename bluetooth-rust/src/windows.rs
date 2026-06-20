@@ -67,12 +67,134 @@ fn bt_u64_to_bytes(addr: u64) -> [u8; 6] {
 /// Do **not** call these methods from inside a tokio async task without
 /// wrapping them in `tokio::task::spawn_blocking`.
 pub struct WindowsRfcommStream {
-    /// The underlying socket kept alive so its COM ref-count stays positive.
-    _socket: StreamSocket,
-    /// Reads bytes from the socket input stream.
-    reader: DataReader,
-    /// Writes bytes to the socket output stream.
-    writer: DataWriter,
+    _socket: windows::Networking::Sockets::StreamSocket,
+    reader: windows::Storage::Streams::DataReader,
+    writer: windows::Storage::Streams::DataWriter,
+    read_fut: Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, String>> + Send + 'static>>>,
+    write_fut: Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, String>> + Send + 'static>>>,
+}
+
+unsafe impl Send for WindowsRfcommStream {}
+unsafe impl Sync for WindowsRfcommStream {}
+
+impl tokio::io::AsyncRead for WindowsRfcommStream {
+    fn poll_read(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if self.read_fut.is_none() {
+            let want = buf.remaining() as u32;
+            let reader = unsafe { &*(&self.reader as *const windows::Storage::Streams::DataReader) };
+            let fut = Box::pin(async move {
+                reader
+                    .LoadAsync(want)
+                    .map_err(|e| e.to_string())?
+                    .await
+                    .map_err(|e| e.to_string())
+            });
+            self.read_fut = Some(fut);
+        }
+
+        let fut = self.read_fut.as_mut().unwrap();
+        match fut.as_mut().poll(cx) {
+            std::task::Poll::Pending => std::task::Poll::Pending,
+            std::task::Poll::Ready(Err(e)) => {
+                self.read_fut = None;
+                std::task::Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
+            std::task::Poll::Ready(Ok(loaded)) => {
+                self.read_fut = None;
+                let loaded = loaded as usize;
+                let dst = buf.initialize_unfilled();
+                for i in 0..loaded {
+                    dst[i] = self
+                        .reader
+                        .ReadByte()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                }
+                buf.advance(loaded);
+                std::task::Poll::Ready(Ok(()))
+            }
+        }
+    }
+}
+
+impl tokio::io::AsyncWrite for WindowsRfcommStream {
+    fn poll_write(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        data: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        if self.write_fut.is_none() {
+            self.writer
+                .WriteBytes(data)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+            let writer = unsafe { &*(&self.writer as *const windows::Storage::Streams::DataWriter) };
+            let fut = Box::pin(async move {
+                writer
+                    .StoreAsync()
+                    .map_err(|e| e.to_string())?
+                    .await
+                    .map_err(|e| e.to_string())
+            });
+            self.write_fut = Some(fut);
+
+            return self.poll_write(cx, &[]);
+        }
+
+        let fut = self.write_fut.as_mut().unwrap();
+        match fut.as_mut().poll(cx) {
+            std::task::Poll::Pending => std::task::Poll::Pending,
+            std::task::Poll::Ready(Err(e)) => {
+                self.write_fut = None;
+                std::task::Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
+            std::task::Poll::Ready(Ok(stored)) => {
+                self.write_fut = None;
+                std::task::Poll::Ready(Ok(stored as usize))
+            }
+        }
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if self.write_fut.is_none() {
+            let writer = unsafe { &*(&self.writer as *const windows::Storage::Streams::DataWriter) };
+            let fut = Box::pin(async move {
+                writer
+                    .FlushAsync()
+                    .map_err(|e| e.to_string())?
+                    .await
+                    .map_err(|e| e.to_string())
+                    .map(|_| 42)
+            });
+            self.write_fut = Some(fut);
+        }
+
+        let fut = self.write_fut.as_mut().unwrap();
+        match fut.as_mut().poll(cx) {
+            std::task::Poll::Pending => std::task::Poll::Pending,
+            std::task::Poll::Ready(Err(e)) => {
+                self.write_fut = None;
+                std::task::Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)))
+            }
+            std::task::Poll::Ready(Ok(_)) => {
+                self.write_fut = None;
+                std::task::Poll::Ready(Ok(()))
+            }
+        }
+    }
+
+    fn poll_shutdown(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        self.poll_flush(cx)
+    }
 }
 
 impl WindowsRfcommStream {
@@ -90,6 +212,8 @@ impl WindowsRfcommStream {
             _socket: socket,
             reader,
             writer,
+            read_fut: None,
+            write_fut: None,
         })
     }
 }
@@ -151,9 +275,34 @@ pub struct BluetoothRfcommConnectable {
 }
 
 impl BluetoothRfcommConnectable {
-    async fn accept(self) -> Result<crate::BluetoothStream, String> {
+    pub async fn accept(self) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
+        let mac = {
+            let info = self.socket.Information().map_err(|e| e.to_string())?;
+            let addr_str = info.RemoteAddress()
+                .map_err(|e| e.to_string())?
+                .DisplayName()
+                .map_err(|e| e.to_string())?
+                .to_string();
+            
+            // Bluetooth MAC addresses come back as "XX:XX:XX:XX:XX:XX"
+            Self::parse_mac(&addr_str).ok_or_else(|| format!("Invalid MAC address: {addr_str}"))?
+        };
         let stream = WindowsRfcommStream::new(self.socket).map_err(|e| e.to_string())?;
-        Ok(stream)
+        
+        Ok((stream, mac, 42))
+    }
+
+    fn parse_mac(s: &str) -> Option<[u8; 6]> {
+        let mut bytes = [0u8; 6];
+        let mut parts = s.split(':');
+        for b in &mut bytes {
+            *b = u8::from_str_radix(parts.next()?, 16).ok()?;
+        }
+        // Ensure there are no extra parts
+        if parts.next().is_some() {
+            return None;
+        }
+        Some(bytes)
     }
 }
 
@@ -186,7 +335,7 @@ impl Drop for BluetoothRfcommProfile {
 }
 
 impl BluetoothRfcommProfile {
-    async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
+    pub async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
         self.rx
             .recv()
             .await
@@ -360,7 +509,7 @@ pub struct BluetoothHandler {
 }
 
 impl BluetoothHandler {
-    async fn register_rfcomm_profile(
+    pub async fn register_rfcomm_profile(
         &self,
         settings: super::BluetoothRfcommProfileSettings,
     ) -> Result<crate::BluetoothRfcommProfile, String> {
