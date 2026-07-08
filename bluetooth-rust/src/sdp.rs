@@ -354,12 +354,10 @@ mod platform {
     use super::*;
     use std::io::{Read, Write};
 
-    use windows::Win32::Devices::Bluetooth::{
-        AF_BTH, BTHPROTO_L2CAP, SOCKADDR_BTH,
-    };
+    use windows::Win32::Devices::Bluetooth::{AF_BTH, BTHPROTO_L2CAP, SOCKADDR_BTH};
     use windows::Win32::Networking::WinSock::{
-        closesocket, connect, recv, send, socket, WSACleanup, WSAStartup, INVALID_SOCKET, SOCK_SEQPACKET,
-        SOCKET, WSADATA,
+        INVALID_SOCKET, SOCK_SEQPACKET, SOCKET, WSACleanup, WSADATA, WSAStartup, closesocket,
+        connect, recv, send, socket,
     };
 
     fn parse_mac_as_u64(mac: &str) -> Result<u64, std::io::Error> {
@@ -388,7 +386,9 @@ mod platform {
     pub fn run_sdp(mac: &str, uuid: u16) -> std::io::Result<ServiceRecord> {
         // ── 1. Initialise WinSock ──────────────────────────────────────────
         let mut wsa_data = WSADATA::default();
-        let rc = unsafe { WSAStartup(0x0202 /* v2.2 */, &mut wsa_data) };
+        let rc = unsafe {
+            WSAStartup(0x0202 /* v2.2 */, &mut wsa_data)
+        };
         if rc != 0 {
             return Err(std::io::Error::from_raw_os_error(rc));
         }
@@ -402,13 +402,7 @@ mod platform {
         let _wsa = WsaGuard;
 
         // ── 2. Create socket ──────────────────────────────────────────────
-        let sock = unsafe {
-            socket(
-                AF_BTH as i32,
-                SOCK_SEQPACKET,
-                BTHPROTO_L2CAP as i32,
-            )
-        };
+        let sock = unsafe { socket(AF_BTH as i32, SOCK_SEQPACKET, BTHPROTO_L2CAP as i32) };
         if Ok(INVALID_SOCKET) == sock {
             return Err(std::io::Error::last_os_error());
         }
@@ -454,7 +448,13 @@ mod platform {
 
         // ── 5. Receive SDP response ───────────────────────────────────────
         let mut buf = [0u8; 4096];
-        let n = unsafe { recv(sock.0, &mut buf, windows::Win32::Networking::WinSock::SEND_RECV_FLAGS(0)) };
+        let n = unsafe {
+            recv(
+                sock.0,
+                &mut buf,
+                windows::Win32::Networking::WinSock::SEND_RECV_FLAGS(0),
+            )
+        };
         if n < 0 {
             return Err(std::io::Error::last_os_error());
         }

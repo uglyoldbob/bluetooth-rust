@@ -70,8 +70,12 @@ pub struct WindowsRfcommStream {
     _socket: windows::Networking::Sockets::StreamSocket,
     reader: windows::Storage::Streams::DataReader,
     writer: windows::Storage::Streams::DataWriter,
-    read_fut: Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, String>> + Send + 'static>>>,
-    write_fut: Option<std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, String>> + Send + 'static>>>,
+    read_fut: Option<
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, String>> + Send + 'static>>,
+    >,
+    write_fut: Option<
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, String>> + Send + 'static>>,
+    >,
 }
 
 unsafe impl Send for WindowsRfcommStream {}
@@ -85,7 +89,8 @@ impl tokio::io::AsyncRead for WindowsRfcommStream {
     ) -> std::task::Poll<std::io::Result<()>> {
         if self.read_fut.is_none() {
             let want = buf.remaining() as u32;
-            let reader = unsafe { &*(&self.reader as *const windows::Storage::Streams::DataReader) };
+            let reader =
+                unsafe { &*(&self.reader as *const windows::Storage::Streams::DataReader) };
             let fut = Box::pin(async move {
                 reader
                     .LoadAsync(want)
@@ -108,10 +113,9 @@ impl tokio::io::AsyncRead for WindowsRfcommStream {
                 let loaded = loaded as usize;
                 let dst = buf.initialize_unfilled();
                 for i in 0..loaded {
-                    dst[i] = self
-                        .reader
-                        .ReadByte()
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    dst[i] = self.reader.ReadByte().map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
+                    })?;
                 }
                 buf.advance(loaded);
                 std::task::Poll::Ready(Ok(()))
@@ -131,7 +135,8 @@ impl tokio::io::AsyncWrite for WindowsRfcommStream {
                 .WriteBytes(data)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
-            let writer = unsafe { &*(&self.writer as *const windows::Storage::Streams::DataWriter) };
+            let writer =
+                unsafe { &*(&self.writer as *const windows::Storage::Streams::DataWriter) };
             let fut = Box::pin(async move {
                 writer
                     .StoreAsync()
@@ -163,7 +168,8 @@ impl tokio::io::AsyncWrite for WindowsRfcommStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         if self.write_fut.is_none() {
-            let writer = unsafe { &*(&self.writer as *const windows::Storage::Streams::DataWriter) };
+            let writer =
+                unsafe { &*(&self.writer as *const windows::Storage::Streams::DataWriter) };
             let fut = Box::pin(async move {
                 writer
                     .FlushAsync()
@@ -278,27 +284,29 @@ impl BluetoothRfcommConnectable {
     pub async fn accept(self) -> Result<(crate::BluetoothStream, [u8; 6], u8), String> {
         let mac = {
             let info = self.socket.Information().map_err(|e| e.to_string())?;
-            let addr_str = info.RemoteAddress()
+            let addr_str = info
+                .RemoteAddress()
                 .map_err(|e| e.to_string())?
                 .DisplayName()
                 .map_err(|e| e.to_string())?
                 .to_string();
-            
+
             // Bluetooth MAC addresses come back as "XX:XX:XX:XX:XX:XX"
-            Self::parse_mac(&addr_str).ok_or_else(|| format!("Invalid MAC address: {addr_str}"))?
+            Self::parse_mac(&addr_str).ok_or_else(|| {
+                format!("Invalid MAC address: {addr_str} {:?}", addr_str.as_bytes())
+            })?
         };
         let stream = WindowsRfcommStream::new(self.socket).map_err(|e| e.to_string())?;
-        
         Ok((stream, mac, 42))
     }
 
     fn parse_mac(s: &str) -> Option<[u8; 6]> {
+        let s = s.trim().trim_start_matches('(').trim_end_matches(')');
         let mut bytes = [0u8; 6];
         let mut parts = s.split(':');
         for b in &mut bytes {
             *b = u8::from_str_radix(parts.next()?, 16).ok()?;
         }
-        // Ensure there are no extra parts
         if parts.next().is_some() {
             return None;
         }
@@ -339,11 +347,7 @@ impl BluetoothRfcommProfile {
         self.rx
             .recv()
             .await
-            .map(|socket| {
-                BluetoothRfcommConnectable {
-                    socket,
-                }
-            })
+            .map(|socket| BluetoothRfcommConnectable { socket })
             .ok_or_else(|| "Connection channel closed".to_string())
     }
 }
@@ -537,9 +541,11 @@ impl BluetoothHandler {
             >::new(move |_sender, args| {
                 if let Some(args) = args.as_ref() {
                     if let Ok(socket) = args.Socket() {
-                        let _ = tx.try_send(socket);
+                        let a = tx.try_send(socket);
+                        log::error!("Try send returned {:?}", a);
                     }
                 }
+                log::error!("Ran connection received");
                 Ok(())
             }))
             .map_err(|e| e.to_string())?;
@@ -567,17 +573,15 @@ impl BluetoothHandler {
 
         // 5. Advertise the service so that remote devices can discover it.
         provider
-            .StartAdvertising(&listener)
+            .StartAdvertisingWithRadioDiscoverability(&listener, true)
             .map_err(|e| e.to_string())?;
 
-        Ok(
-            BluetoothRfcommProfile {
-                provider,
-                listener,
-                rx,
-                token,
-            },
-        )
+        Ok(BluetoothRfcommProfile {
+            provider,
+            listener,
+            rx,
+            token,
+        })
     }
 
     async fn register_l2cap_profile(
@@ -620,9 +624,7 @@ impl BluetoothHandler {
                     .await
                     .map_err(|e| e.to_string())
             }) {
-                devices.push(BluetoothDevice {
-                    inner: device,
-                });
+                devices.push(BluetoothDevice { inner: device });
             }
         }
         Some(devices)

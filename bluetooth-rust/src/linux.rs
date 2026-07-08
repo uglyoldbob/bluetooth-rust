@@ -60,11 +60,7 @@ impl BluetoothRfCommConnectable {
         match s {
             Ok(s) => {
                 let addr = s.peer_addr().map_err(|e| e.to_string())?;
-                Ok((
-                    BluetoothStream(Box::pin(s)),
-                    *addr.addr,
-                    addr.channel,
-                ))
+                Ok((BluetoothStream(Box::pin(s)), *addr.addr, addr.channel))
             }
             Err(e) => Err(e.to_string()),
         }
@@ -78,7 +74,8 @@ impl BluetoothRfCommConnectable {
 impl BluetoothRfcommProfile {
     /// get an rfcomm connectable struct
     pub async fn connectable(&mut self) -> Result<crate::BluetoothRfcommConnectable, String> {
-        self.0.next()
+        self.0
+            .next()
             .await
             .map(|a| BluetoothRfCommConnectable(a))
             .ok_or_else(|| "Failed to get bluetooth connection".to_string())
@@ -566,9 +563,7 @@ impl BluetoothHandler {
             };
             if let Ok(devices) = result {
                 for dev in devices {
-                    list.push(LinuxBluetoothDevice::new(
-                        dev,
-                    ));
+                    list.push(LinuxBluetoothDevice::new(dev));
                 }
             }
         }

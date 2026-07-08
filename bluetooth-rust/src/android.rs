@@ -116,9 +116,7 @@ pub struct RfcommStream {
 impl RfcommStream {
     /// Build a new Self
     pub fn new(socket: jni::refs::Global<JObject<'static>>) -> Result<Self, String> {
-        Ok(Self {
-            socket,
-        })
+        Ok(Self { socket })
     }
 }
 
@@ -150,13 +148,12 @@ impl std::io::Write for RfcommStream {
         java.attach_current_thread(|env| {
             let ba = env.byte_array_from_slice(buf)?;
             let socket = self.socket.as_obj();
-            let _ = env
-                .call_method(
-                    socket,
-                    jni::jni_str!("write"),
-                    jni::jni_sig!("([B)V"),
-                    &[(&ba).into()],
-                )?;
+            let _ = env.call_method(
+                socket,
+                jni::jni_str!("write"),
+                jni::jni_sig!("([B)V"),
+                &[(&ba).into()],
+            )?;
             Ok(buf.len())
         })
         .map_err(jerr)
@@ -166,8 +163,7 @@ impl std::io::Write for RfcommStream {
         let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let socket = self.socket.as_obj();
-            let _ = env
-                .call_method(socket, jni::jni_str!("flush"), jni::jni_sig!("()V"), &[])?;
+            let _ = env.call_method(socket, jni::jni_str!("flush"), jni::jni_sig!("()V"), &[])?;
             Ok(())
         })
         .map_err(jerr)
@@ -242,15 +238,15 @@ impl Bluetooth {
         let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let mac = env.new_string(address)?;
-            let device = env.call_method(
-                &self.adapter,
-                jni::jni_str!("getRemoteDevice"),
-                jni::jni_sig!("(Ljava/lang/String;)Landroid/bluetooth/BluetoothDevice;"),
-                &[jni::JValue::Object(&mac)],
-            )?.l()?;
-            Ok(BluetoothDevice::new(
-                env.new_global_ref(device)?,
-            ))
+            let device = env
+                .call_method(
+                    &self.adapter,
+                    jni::jni_str!("getRemoteDevice"),
+                    jni::jni_sig!("(Ljava/lang/String;)Landroid/bluetooth/BluetoothDevice;"),
+                    &[jni::JValue::Object(&mac)],
+                )?
+                .l()?;
+            Ok(BluetoothDevice::new(env.new_global_ref(device)?))
         })
     }
 
@@ -376,7 +372,8 @@ impl Bluetooth {
             java.attach_current_thread(|env| {
                 let context = JAVA_CONTEXT.get().unwrap();
                 let context = env.new_local_ref(context.as_obj())?;
-                let arg = env.new_string("android.bluetooth.adapter.action.REQUEST_DISCOVERABLE")?;
+                let arg =
+                    env.new_string("android.bluetooth.adapter.action.REQUEST_DISCOVERABLE")?;
                 let intent = env
                     .new_object(
                         jni::jni_str!("android/content/Intent"),
@@ -397,9 +394,9 @@ impl Bluetooth {
                 );
                 log::error!("Results of bluetooth enable discoverable is {:?}", a);
                 Ok(())
-            }).map_err(|_e: jni::errors::Error| ())
-        }
-        else {
+            })
+            .map_err(|_e: jni::errors::Error| ())
+        } else {
             Ok(())
         }
     }
@@ -423,7 +420,8 @@ impl Bluetooth {
         let java = jni_min_helper::jni_get_vm();
         let ss = java
             .attach_current_thread(|env| env.new_global_ref(self.adapter.as_obj()))
-            .map_err(|e| jerr(e).to_string()).unwrap();
+            .map_err(|e| jerr(e).to_string())
+            .unwrap();
         BluetoothDiscovery::new(ss).into()
     }
 
@@ -442,7 +440,8 @@ impl Bluetooth {
             let temp = env.new_local_ref(&dev_name)?;
             let n = env.cast_local::<jni::objects::JString>(temp)?;
             Ok::<_, jni::errors::Error>(super::BluetoothAdapterAddress::String(n.to_string()))
-        }).ok()
+        })
+        .ok()
     }
 }
 
@@ -469,7 +468,12 @@ impl Bluetooth {
         if self.receiver.is_none() {
             let arg1 = jni_min_helper::BroadcastReceiver::build(|env, _context, intent| {
                 let action = env
-                    .call_method(intent, jni::jni_str!("getAction"), jni::jni_sig!("()Ljava/lang/String;"), &[])?
+                    .call_method(
+                        intent,
+                        jni::jni_str!("getAction"),
+                        jni::jni_sig!("()Ljava/lang/String;"),
+                        &[],
+                    )?
                     .l()?;
                 if action.is_null() {
                     return Err(jni::errors::Error::NullPtr("No action"));
@@ -490,10 +494,7 @@ impl Bluetooth {
     }
 
     /// Request permission if it is not present because we need it
-    pub fn try_get_permissions(
-        &self,
-        permission: &str,
-    ) -> Result<bool, std::io::Error> {
+    pub fn try_get_permissions(&self, permission: &str) -> Result<bool, std::io::Error> {
         let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let context = JAVA_CONTEXT.get().unwrap();
@@ -502,7 +503,8 @@ impl Bluetooth {
             } else {
                 Ok(true)
             }
-        }).map_err(jerr)
+        })
+        .map_err(jerr)
     }
 
     /// Check to see if we have the specified permission
@@ -511,7 +513,8 @@ impl Bluetooth {
         java.attach_current_thread(|env| {
             let context = JAVA_CONTEXT.get().unwrap();
             self.check_permission2(env, &context, permission)
-        }).map_err(jerr)
+        })
+        .map_err(jerr)
     }
 
     /// Attempt to get the permisssion needed
@@ -523,7 +526,12 @@ impl Bluetooth {
     ) -> Result<bool, jni::errors::Error> {
         // Get ClassLoader instance from activity
         let class_loader_obj = env
-            .call_method(&context, jni::jni_str!("getClassLoader"), jni::jni_sig!("()Ljava/lang/ClassLoader;"), &[])
+            .call_method(
+                &context,
+                jni::jni_str!("getClassLoader"),
+                jni::jni_sig!("()Ljava/lang/ClassLoader;"),
+                &[],
+            )
             .expect("Failed to get ClassLoader")
             .l()?;
 
@@ -531,7 +539,7 @@ impl Bluetooth {
         let class_name = env.new_string("com.example.android.JniBridge")?;
 
         // Call loadClass method (no need to get_method_id explicitly, call_method resolves it)
-        let jni_bridge_class_obj : jni::objects::JObject = env
+        let jni_bridge_class_obj: jni::objects::JObject = env
             .call_method(
                 class_loader_obj,
                 jni::jni_str!("loadClass"),
@@ -541,25 +549,27 @@ impl Bluetooth {
             .expect("Failed to call loadClass")
             .l()?;
 
-        let jni_bridge_class_obj: jni::objects::JClass = env.cast_local::<jni::objects::JClass>(jni_bridge_class_obj)?;
+        let jni_bridge_class_obj: jni::objects::JClass =
+            env.cast_local::<jni::objects::JClass>(jni_bridge_class_obj)?;
 
         // Convert JObject to JClass for new_object
         let jni_bridge_class = jni::objects::JClass::from(jni_bridge_class_obj);
 
         // Instantiate JniBridge using its no-arg constructor
-        let jni_bridge_obj = env
-            .new_object(jni_bridge_class, jni::jni_sig!("()V"), &[])?;
+        let jni_bridge_obj = env.new_object(jni_bridge_class, jni::jni_sig!("()V"), &[])?;
 
         let activity = env.new_local_ref(JAVA_CONTEXT.get().unwrap().as_obj())?;
 
         let arg2 = env.new_string(permission)?;
-        let asdf = env
-            .call_method(
-                jni_bridge_obj,
-                jni::jni_str!("requestPermission"),
-                jni::jni_sig!("(Landroid/app/Activity;Ljava/lang/String;)I"),
-                &[jni::objects::JValue::Object(&activity), (&arg2).try_into().unwrap()],
-            )?;
+        let asdf = env.call_method(
+            jni_bridge_obj,
+            jni::jni_str!("requestPermission"),
+            jni::jni_sig!("(Landroid/app/Activity;Ljava/lang/String;)I"),
+            &[
+                jni::objects::JValue::Object(&activity),
+                (&arg2).try_into().unwrap(),
+            ],
+        )?;
         asdf.i().map(|v| v == 0)
     }
 
@@ -572,7 +582,12 @@ impl Bluetooth {
     ) -> Result<bool, jni::errors::Error> {
         // Get ClassLoader instance from activity
         let class_loader_obj = env
-            .call_method(&context, jni::jni_str!("getClassLoader"), jni::jni_sig!("()Ljava/lang/ClassLoader;"), &[])
+            .call_method(
+                &context,
+                jni::jni_str!("getClassLoader"),
+                jni::jni_sig!("()Ljava/lang/ClassLoader;"),
+                &[],
+            )
             .expect("Failed to get ClassLoader")
             .l()?;
 
@@ -580,7 +595,7 @@ impl Bluetooth {
         let class_name = env.new_string("com.example.android.JniBridge")?;
 
         // Call loadClass method (no need to get_method_id explicitly, call_method resolves it)
-        let jni_bridge_class_obj : jni::objects::JObject = env
+        let jni_bridge_class_obj: jni::objects::JObject = env
             .call_method(
                 class_loader_obj,
                 jni::jni_str!("loadClass"),
@@ -590,25 +605,27 @@ impl Bluetooth {
             .expect("Failed to call loadClass")
             .l()?;
 
-        let jni_bridge_class_obj: jni::objects::JClass = env.cast_local::<jni::objects::JClass>(jni_bridge_class_obj)?;
+        let jni_bridge_class_obj: jni::objects::JClass =
+            env.cast_local::<jni::objects::JClass>(jni_bridge_class_obj)?;
 
         // Convert JObject to JClass for new_object
         let jni_bridge_class = jni::objects::JClass::from(jni_bridge_class_obj);
 
         // Instantiate JniBridge using its no-arg constructor
-        let jni_bridge_obj = env
-            .new_object(jni_bridge_class, jni::jni_sig!("()V"), &[])?;
+        let jni_bridge_obj = env.new_object(jni_bridge_class, jni::jni_sig!("()V"), &[])?;
 
         let activity = env.new_local_ref(JAVA_CONTEXT.get().unwrap().as_obj())?;
 
         let arg2 = env.new_string(permission)?;
-        let asdf = env
-            .call_method(
-                jni_bridge_obj,
-                jni::jni_str!("checkSelfPermission"),
-                jni::jni_sig!("(Landroid/content/Context;Ljava/lang/String;)I"),
-                &[jni::objects::JValue::Object(&activity), (&arg2).try_into().unwrap()],
-            )?;
+        let asdf = env.call_method(
+            jni_bridge_obj,
+            jni::jni_str!("checkSelfPermission"),
+            jni::jni_sig!("(Landroid/content/Context;Ljava/lang/String;)I"),
+            &[
+                jni::objects::JValue::Object(&activity),
+                (&arg2).try_into().unwrap(),
+            ],
+        )?;
         asdf.i().map(|v| v == 0)
     }
 
@@ -642,7 +659,8 @@ impl Bluetooth {
                 );
                 log::error!("Results of bluetooth enable is {:?}", a);
                 Ok::<(), jni::errors::Error>(())
-            }).unwrap();
+            })
+            .unwrap();
         }
     }
 
@@ -651,8 +669,15 @@ impl Bluetooth {
         self.check_adapter();
         let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
-            env.call_method(&self.adapter, jni::jni_str!("isEnabled"), jni::jni_sig!("()Z"), &[])?.into_bool()
-        }).unwrap()
+            env.call_method(
+                &self.adapter,
+                jni::jni_str!("isEnabled"),
+                jni::jni_sig!("()Z"),
+                &[],
+            )?
+            .into_bool()
+        })
+        .unwrap()
     }
 
     /// Get the list of bonded devices for the bluetooth adapter
@@ -660,10 +685,20 @@ impl Bluetooth {
         let java = jni_min_helper::jni_get_vm();
         java.attach_current_thread(|env| {
             let dev_set = env
-                .call_method(&self.adapter, jni::jni_str!("getBondedDevices"), jni::jni_sig!("()Ljava/util/Set;"), &[])?
+                .call_method(
+                    &self.adapter,
+                    jni::jni_str!("getBondedDevices"),
+                    jni::jni_sig!("()Ljava/util/Set;"),
+                    &[],
+                )?
                 .l()?;
             let jarr = env
-                .call_method(&dev_set, jni::jni_str!("toArray"), jni::jni_sig!("()[Ljava/lang/Object;"), &[])?
+                .call_method(
+                    &dev_set,
+                    jni::jni_str!("toArray"),
+                    jni::jni_sig!("()[Ljava/lang/Object;"),
+                    &[],
+                )?
                 .l()?;
             let temp = env.new_local_ref(&jarr)?;
             let jarr = env.cast_local::<jni::objects::JObjectArray>(temp)?;
@@ -671,12 +706,11 @@ impl Bluetooth {
             let mut vec = Vec::with_capacity(len);
             for i in 0..len {
                 let temp = jarr.get_element(env, i)?;
-                vec.push(BluetoothDevice::new(
-                    env.new_global_ref(temp)?,
-                ));
+                vec.push(BluetoothDevice::new(env.new_global_ref(temp)?));
             }
             Ok(vec)
-        }).map_err(jerr)
+        })
+        .map_err(jerr)
     }
 
     fn get_adapter<'a>(
@@ -745,5 +779,6 @@ pub fn init_java(app: &AndroidApp) {
             .set(Arc::new(env.new_global_ref(context)?))
             .unwrap();
         Ok::<_, jni::errors::Error>(())
-    }).unwrap();
+    })
+    .unwrap();
 }

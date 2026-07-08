@@ -73,12 +73,7 @@ impl BluetoothSocket {
                 let arc_buf_read = self.buf_read.clone();
                 let arc_callback = self.read_callback.clone();
                 self.thread_read.replace(std::thread::spawn(move || {
-                    BluetoothSocket::read_loop(
-                        socket,
-                        input_stream,
-                        arc_buf_read,
-                        arc_callback,
-                    )
+                    BluetoothSocket::read_loop(socket, input_stream, arc_buf_read, arc_callback)
                 }));
                 log::warn!("Done connecting");
                 Ok(true)
@@ -125,8 +120,7 @@ impl BluetoothSocket {
 
             let array_size = Self::ARRAY_SIZE as usize;
             let temp = env.new_byte_array(array_size)?.into();
-            let array_write =
-                env.new_global_ref::<JObject>(temp)?;
+            let array_write = env.new_global_ref::<JObject>(temp)?;
             Ok(Self {
                 internal: obj,
 
@@ -354,8 +348,7 @@ impl std::io::Write for BluetoothSocket {
             if al < buf.len() {
                 // replace the prepared reusable Java array with a larger array
                 let temp = env.byte_array_from_slice(buf)?.into();
-                self.array_write =
-                    env.new_global_ref::<JObject>(temp)?;
+                self.array_write = env.new_global_ref::<JObject>(temp)?;
             } else {
                 // Safety: casts `&[u8]` to `&[i8]` for `set_byte_array_region`.
                 let buf =

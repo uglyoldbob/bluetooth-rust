@@ -248,15 +248,11 @@ impl BluetoothAdapterBuilder {
     pub async fn build(self) -> Result<BluetoothAdapter, String> {
         #[cfg(target_os = "linux")]
         {
-            return Ok(
-                linux::BluetoothHandler::new(self.s.unwrap()).await?,
-            );
+            return Ok(linux::BluetoothHandler::new(self.s.unwrap()).await?);
         }
         #[cfg(target_os = "windows")]
         {
-            return Ok(
-                windows::BluetoothHandler::new(self.s.unwrap()).await?,
-            );
+            return Ok(windows::BluetoothHandler::new(self.s.unwrap()).await?);
         }
     }
 }
@@ -320,7 +316,6 @@ pub type BluetoothL2capProfile = ();
 /// A bluetooth rfcomm socket
 #[cfg(target_os = "android")]
 pub type BluetoothSocket = android::BluetoothSocket;
-
 
 /// A bluetooth rfcomm socket
 #[cfg(target_os = "linux")]

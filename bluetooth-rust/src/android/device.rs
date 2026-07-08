@@ -16,19 +16,18 @@ impl BluetoothDevice {
     /// Run the sdp protocol
     pub fn run_sdp(&self) -> Result<crate::ServiceRecord, String> {
         let java = jni_min_helper::jni_get_vm();
-        java
-            .attach_current_thread(|env| {
-                let dev_name = env
-                    .call_method(
-                        &self.internal,
-                        jni::jni_str!("fetchUuidsWithSdp"),
-                        jni::jni_sig!("()Z"),
-                        &[],
-                    )?
-                    .into_bool()?;
-                Ok(dev_name)
-            })
-            .map_err(|e| jerr(e).to_string())?;
+        java.attach_current_thread(|env| {
+            let dev_name = env
+                .call_method(
+                    &self.internal,
+                    jni::jni_str!("fetchUuidsWithSdp"),
+                    jni::jni_sig!("()Z"),
+                    &[],
+                )?
+                .into_bool()?;
+            Ok(dev_name)
+        })
+        .map_err(|e| jerr(e).to_string())?;
         Ok(())
     }
 
@@ -85,10 +84,7 @@ impl BluetoothDevice {
                     jni::jni_sig!("(Ljava/util/UUID;)Landroid/bluetooth/BluetoothSocket;"),
                     &[(&uuid3).into()],
                 )?;
-                let socket = env.new_global_ref(
-                    object
-                    .l()?,
-                )?;
+                let socket = env.new_global_ref(object.l()?)?;
                 log::warn!("Building2 rfcomm for {}", uuid);
                 let socket = BluetoothSocket::build(socket, uuid);
                 if let Ok(a) = socket {
@@ -139,10 +135,7 @@ impl BluetoothDevice {
                     jni::jni_sig!("(Ljava/util/UUID;)Landroid/bluetooth/BluetoothSocket;"),
                     &[(&uuid3).into()],
                 )?;
-                let socket = env.new_global_ref(
-                    object
-                    .l()?,
-                )?;
+                let socket = env.new_global_ref(object.l()?)?;
                 log::warn!("Building2 rfcomm for {}", uuid);
                 let socket = BluetoothSocket::build(socket, uuid);
                 if let Ok(a) = socket {
