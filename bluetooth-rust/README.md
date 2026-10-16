@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/bluetooth-rust)](https://crates.io/crates/bluetooth-rust)
 [![License](https://img.shields.io/crates/l/bluetooth-rust)](https://github.com/uglyoldbob/bluetooth-rust)
 
-A cross-platform Bluetooth communication library for Rust. `bluetooth-rust` provides a unified API for discovering adapters, scanning for devices, managing pairing, and establishing RFCOMM and L2CAP connections across Linux, Windows, and Android.
+A cross-platform Bluetooth communication library for Rust. `bluetooth-rust` provides platform-specific APIs for discovering adapters and devices, managing pairing, and establishing Bluetooth connections.
 
 ## Platform Support
 
@@ -12,14 +12,20 @@ A cross-platform Bluetooth communication library for Rust. `bluetooth-rust` prov
 | Linux    | BlueZ (`bluer`) | ✅ | ❌ |
 | Windows  | Windows API | ✅ | ✅ |
 | Android  | JNI (Android SDK) | ❌ | ✅ |
+| macOS    | IOBluetooth | ✅ Classic discovery and RFCOMM client | ❌ |
+
+The macOS backend uses Apple's IOBluetooth framework for Classic Bluetooth
+device inquiry, paired-device enumeration, SDP service UUID lookup, and
+outgoing RFCOMM connections. Incoming RFCOMM profile registration and L2CAP
+are not currently implemented on macOS. It requires the `async` feature.
 
 ## Features
 
 - **Adapter discovery** — enumerate Bluetooth adapters on the host system
 - **Device discovery** — scan for nearby Bluetooth devices
 - **Paired device listing** — retrieve bonded/paired devices
-- **RFCOMM profiles** — register and accept RFCOMM connections
-- **L2CAP profiles** — register and accept L2CAP connections
+- **RFCOMM** — register and accept profiles on supported backends, and connect to remote channels
+- **L2CAP profiles** — register and accept L2CAP connections on supported backends
 - **Passkey / pairing** — display and confirm passkeys during the pairing process
 - **Discoverability** — make the local adapter discoverable
 - **Well-known UUIDs** — built-in enum of standard Bluetooth service UUIDs
@@ -50,6 +56,15 @@ No additional runtime setup is required. The library uses the built-in Windows B
 ### Android Prerequisites
 
 The library uses JNI to call into the Android Bluetooth SDK. You must integrate it with an Android activity that provides an `AndroidApp` handle (via [`winit`](https://crates.io/crates/winit) with the `android-native-activity` feature) and grant the appropriate Bluetooth permissions in your `AndroidManifest.xml`.
+
+### macOS Prerequisites
+
+The macOS backend uses Apple's IOBluetooth framework. Bluetooth authorization
+and pairing are managed by macOS.
+
+Use `BluetoothAdapter::start_discovery()` to start a Classic Bluetooth inquiry.
+Call `devices()` on the returned handle to retrieve devices found so far; drop
+the handle to stop the inquiry.
 
 ## Quick Start
 

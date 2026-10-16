@@ -10,8 +10,13 @@ compile_error!("Must enable either the `sync` or `async` feature");
 #[cfg(all(feature = "sync", feature = "async"))]
 compile_error!("Cannot enable both `sync` and `async` features simultaneously");
 
+#[cfg(all(target_os = "macos", feature = "sync"))]
+compile_error!("The macOS IOBluetooth backend requires the `async` feature");
+
 #[cfg(target_os = "android")]
 pub mod android;
+#[cfg(all(target_os = "macos", feature = "async"))]
+pub mod macos;
 #[cfg(target_os = "android")]
 pub use android::Bluetooth;
 #[cfg(target_os = "android")]
@@ -144,6 +149,10 @@ pub type BluetoothDiscovery = android::BluetoothDiscovery;
 #[cfg(target_os = "linux")]
 pub type BluetoothDiscovery = linux::BluetoothDiscovery;
 
+/// Used for discovering Classic Bluetooth devices on macOS
+#[cfg(all(target_os = "macos", feature = "async"))]
+pub type BluetoothDiscovery = macos::BluetoothDiscovery;
+
 /// Used for discovering bluetooth devices
 #[cfg(target_os = "windows")]
 pub type BluetoothDiscovery = windows::BluetoothDiscovery;
@@ -176,6 +185,10 @@ pub type BluetoothDevice = android::BluetoothDevice;
 #[cfg(target_os = "linux")]
 pub type BluetoothDevice = linux::LinuxBluetoothDevice;
 
+/// A Classic Bluetooth device on macOS
+#[cfg(all(target_os = "macos", feature = "async"))]
+pub type BluetoothDevice = macos::BluetoothDevice;
+
 /// A bluetooth device
 #[cfg(target_os = "windows")]
 pub type BluetoothDevice = windows::BluetoothDevice;
@@ -191,6 +204,10 @@ pub type BluetoothAdapter = linux::BluetoothHandler;
 /// Represents a bluetooth adapter that communicates to bluetooth devices
 #[cfg(target_os = "windows")]
 pub type BluetoothAdapter = windows::BluetoothHandler;
+
+/// Represents the macOS IOBluetooth controller handler
+#[cfg(all(target_os = "macos", feature = "async"))]
+pub type BluetoothAdapter = macos::BluetoothHandler;
 
 /// A builder for `BluetoothAdapter`
 pub struct BluetoothAdapterBuilder {
@@ -254,6 +271,10 @@ impl BluetoothAdapterBuilder {
         {
             return Ok(windows::BluetoothHandler::new(self.s.unwrap()).await?);
         }
+        #[cfg(target_os = "macos")]
+        {
+            macos::BluetoothHandler::new().await
+        }
     }
 }
 
@@ -268,6 +289,10 @@ pub type BluetoothStream = android::RfcommStream;
 /// An active stream for bluetooth communications
 #[cfg(target_os = "windows")]
 pub type BluetoothStream = windows::WindowsRfcommStream;
+
+/// An active Classic Bluetooth RFCOMM stream on macOS
+#[cfg(all(target_os = "macos", feature = "async"))]
+pub type BluetoothStream = macos::BluetoothStream;
 
 /// A type that allows rfcomm connections
 #[cfg(target_os = "android")]
@@ -324,3 +349,7 @@ pub type BluetoothSocket = linux::BluetoothRfcommSocket;
 /// A bluetooth rfcomm socket
 #[cfg(target_os = "windows")]
 pub type BluetoothSocket = windows::BluetoothRfcommSocket;
+
+/// A Classic Bluetooth RFCOMM socket on macOS
+#[cfg(all(target_os = "macos", feature = "async"))]
+pub type BluetoothSocket = macos::BluetoothSocket;
